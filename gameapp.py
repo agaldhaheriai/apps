@@ -10,39 +10,36 @@ st.set_page_config(
     page_title="3D Turbo Racing League", layout="wide", page_icon="🏎️"
 )
 
-# Custom High-Contrast Styling
+# Custom Bright / High-Visibility Light Styling
 st.markdown(\"\"\"
 <style>
     .stApp {
-        background: linear-gradient(rgba(10, 10, 15, 0.75), rgba(10, 10, 15, 0.85)), 
-                    url('https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?auto=format&fit=crop&w=1920&q=80');
-        background-size: cover;
-        background-attachment: fixed;
-        background-position: center;
+        background: #F4F6F9;
     }
     
     html, body, [class*="css"], .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label, div {
-        color: #FFFFFF !important;
-        text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.9);
+        color: #1A1D20 !important;
+        text-shadow: none !important;
     }
     
     .stTabs [data-baseweb="tab-list"] {
-        background-color: rgba(20, 20, 30, 0.9);
+        background-color: #E2E8F0;
         border-radius: 8px;
         padding: 5px;
     }
     .stTabs [data-baseweb="tab"] {
-        color: #E0E0E0 !important;
+        color: #4A5568 !important;
         font-weight: 600;
     }
     .stTabs [aria-selected="true"] {
-        color: #00FFCC !important;
-        border-bottom-color: #00FFCC !important;
+        color: #2B6CB0 !important;
+        border-bottom-color: #2B6CB0 !important;
     }
     
     input, select, textarea, div[role="combobox"] {
-        color: #FFFFFF !important;
-        background-color: rgba(25, 30, 40, 0.95) !important;
+        color: #1A1D20 !important;
+        background-color: #FFFFFF !important;
+        border: 1px solid #CBD5E0 !important;
     }
 </style>
 \"\"\", unsafe_allow_html=True)
@@ -62,12 +59,11 @@ if "current_user" not in st.session_state:
 
 if "sessions" not in st.session_state:
     st.session_state.sessions = {
-        "Session #101 (Night Track)": {"host": "ProRacer", "players": ["ProRacer"], "max": 2, "status": "Waiting"},
-        "Session #102 (Circuit)": {"host": "DriftKing", "players": ["DriftKing"], "max": 2, "status": "Waiting"}
+        "Session #101 (Daylight Circuit)": {"host": "ProRacer", "players": ["ProRacer"], "max": 2, "status": "Waiting"},
+        "Session #102 (Sunburst Oval)": {"host": "DriftKing", "players": ["DriftKing"], "max": 2, "status": "Waiting"}
     }
 
 def record_race_results(winner, loser, winner_time, speed_lvl):
-    # Winner Record
     if winner not in st.session_state.leaderboard:
         st.session_state.leaderboard[winner] = {"Wins": 0, "Total Points": 0, "Fastest Time (s)": 999.0, "Races": 0}
     w_entry = st.session_state.leaderboard[winner]
@@ -77,7 +73,6 @@ def record_race_results(winner, loser, winner_time, speed_lvl):
     if winner_time < w_entry["Fastest Time (s)"]:
         w_entry["Fastest Time (s)"] = round(winner_time, 2)
 
-    # Loser Record
     if loser not in st.session_state.leaderboard:
         st.session_state.leaderboard[loser] = {"Wins": 0, "Total Points": 0, "Fastest Time (s)": 999.0, "Races": 0}
     l_entry = st.session_state.leaderboard[loser]
@@ -139,34 +134,34 @@ with tab_arena:
     with col5:
         camera_view = st.selectbox("3D Camera:", ["Chase Cam (Behind)", "Third-Person (High)", "Top-Down (Map)"])
 
-    # Three.js Game Engine with WebAudio and Automatic End Messages
+    # Three.js Game Engine with Bright Lighting
     threejs_html = f\"\"\"
     <!DOCTYPE html>
     <html>
     <head>
         <style>
-            body {{ margin: 0; overflow: hidden; background-color: #05050a; font-family: 'Segoe UI', sans-serif; }}
+            body {{ margin: 0; overflow: hidden; background-color: #87CEEB; font-family: 'Segoe UI', sans-serif; }}
             #hud {{ 
-                position: absolute; top: 12px; left: 12px; color: #fff; 
-                font-weight: bold; font-size: 14px; text-shadow: 2px 2px 4px #000; z-index: 10;
-                background: rgba(10, 12, 20, 0.75); padding: 12px 18px; border-radius: 8px;
-                border: 1px solid rgba(0,255,204,0.3); backdrop-filter: blur(4px);
+                position: absolute; top: 12px; left: 12px; color: #101828; 
+                font-weight: bold; font-size: 14px; z-index: 10;
+                background: rgba(255, 255, 255, 0.92); padding: 12px 18px; border-radius: 8px;
+                border: 2px solid #2563EB; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             }}
             #start-btn {{
                 position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
                 padding: 18px 42px; font-size: 24px; font-weight: bold; color: #fff;
-                background: linear-gradient(45deg, #ff0055, #ff5500); border: none; border-radius: 12px; cursor: pointer;
-                box-shadow: 0 0 25px rgba(255,0,85,0.6); z-index: 20; transition: all 0.2s;
+                background: linear-gradient(45deg, #059669, #10B981); border: none; border-radius: 12px; cursor: pointer;
+                box-shadow: 0 4px 20px rgba(16,185,129,0.5); z-index: 20; transition: all 0.2s;
             }}
             #start-btn:hover {{ transform: translate(-50%, -50%) scale(1.05); }}
             #end-modal {{
                 display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-                width: 80%; max-width: 500px; background: rgba(15, 18, 30, 0.95); border: 2px solid #00ffcc;
-                border-radius: 16px; padding: 24px; text-align: center; color: white; z-index: 30;
-                box-shadow: 0 0 35px rgba(0, 255, 204, 0.4); backdrop-filter: blur(8px);
+                width: 80%; max-width: 500px; background: rgba(255, 255, 255, 0.98); border: 3px solid #2563EB;
+                border-radius: 16px; padding: 24px; text-align: center; color: #1E293B; z-index: 30;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
             }}
-            .winner-box {{ background: rgba(0, 255, 150, 0.15); border: 1px solid #00ff99; padding: 15px; border-radius: 10px; margin-bottom: 12px; }}
-            .loser-box {{ background: rgba(255, 50, 80, 0.15); border: 1px solid #ff3250; padding: 15px; border-radius: 10px; }}
+            .winner-box {{ background: #ECFDF5; border: 2px solid #10B981; padding: 15px; border-radius: 10px; margin-bottom: 12px; color: #065F46; }}
+            .loser-box {{ background: #FEF2F2; border: 2px solid #EF4444; padding: 15px; border-radius: 10px; color: #991B1B; }}
             canvas {{ display: block; width: 100vw; height: 550px; }}
         </style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -175,19 +170,19 @@ with tab_arena:
         <button id="start-btn" onclick="startRace()">🔊 START RACE</button>
         <div id="hud">
             🏎️ Track Level {level_choice} | Power Level: {speed_lvl}<br>
-            ⏱️ Time: <span id="timer-display" style="color:#00ffcc;">0.0s</span><br>
-            <span id="p1-hud" style="color: #ff4444;">{p1_driver}: Lap 0/3</span> | 
-            <span id="p2-hud" style="color: #4488ff;">{p2_driver}: Lap 0/3</span><br>
-            <span id="game-status" style="color: #ffcc00;">Click START RACE to ignite engine!</span>
+            ⏱️ Time: <span id="timer-display" style="color:#2563EB;">0.0s</span><br>
+            <span id="p1-hud" style="color: #DC2626;">{p1_driver}: Lap 0/3</span> | 
+            <span id="p2-hud" style="color: #2563EB;">{p2_driver}: Lap 0/3</span><br>
+            <span id="game-status" style="color: #D97706;">Click START RACE to begin!</span>
         </div>
 
         <div id="end-modal">
             <div class="winner-box">
-                <h2 style="margin:0 0 8px 0; color:#00ff99;">🏆 CONGRATULATIONS!</h2>
+                <h2 style="margin:0 0 8px 0;">🏆 CONGRATULATIONS!</h2>
                 <div id="winner-text" style="font-size:18px; font-weight:bold;"></div>
             </div>
             <div class="loser-box">
-                <h3 style="margin:0 0 6px 0; color:#ff5577;">💔 HARD LUCK!</h3>
+                <h3 style="margin:0 0 6px 0;">💔 HARD LUCK!</h3>
                 <div id="loser-text" style="font-size:15px;"></div>
             </div>
         </div>
@@ -275,10 +270,9 @@ with tab_arena:
                 nitroGain.gain.setTargetAtTime(targetNitro, audioCtx.currentTime, 0.05);
             }}
 
-            // Three.js Scene Setup
+            // Three.js Scene Setup (High Visibility Light Environment)
             const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x0a0a12);
-            scene.fog = new THREE.FogExp2(0x0a0a12, 0.008);
+            scene.background = new THREE.Color(0x99D9EA); // Bright Daylight Sky
 
             const camera = new THREE.PerspectiveCamera(60, window.innerWidth / 550, 0.1, 1000);
             const renderer = new THREE.WebGLRenderer({{ antialias: true }});
@@ -286,16 +280,18 @@ with tab_arena:
             renderer.shadowMap.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            const ambientLight = new THREE.AmbientLight(0x222233, 0.8);
+            // Bright Daylight Lights
+            const ambientLight = new THREE.AmbientLight(0xFFFFFF, 1.2);
             scene.add(ambientLight);
             
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-            dirLight.position.set(50, 100, 50);
-            dirLight.castShadow = true;
-            scene.add(dirLight);
+            const sunLight = new THREE.DirectionalLight(0xFFFFFF, 1.5);
+            sunLight.position.set(50, 120, 50);
+            sunLight.castShadow = true;
+            scene.add(sunLight);
 
+            // Grass Terrain
             const groundGeo = new THREE.PlaneGeometry(300, 300);
-            const groundMat = new THREE.MeshStandardMaterial({{ color: 0x081008, roughness: 0.9 }});
+            const groundMat = new THREE.MeshStandardMaterial({{ color: 0x4CAF50, roughness: 0.8 }});
             const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.receiveShadow = true;
@@ -327,8 +323,9 @@ with tab_arena:
                 ], true);
             }}
 
+            // High-Contrast Road Surface
             const trackGeo = new THREE.TubeGeometry(trackCurve, 150, trackWidth, 8, true);
-            const trackMat = new THREE.MeshStandardMaterial({{ color: 0x222228, roughness: 0.4 }});
+            const trackMat = new THREE.MeshStandardMaterial({{ color: 0x333338, roughness: 0.3 }});
             const trackMesh = new THREE.Mesh(trackGeo, trackMat);
             trackMesh.scale.set(1, 0.01, 1);
             trackMesh.position.y = 0.02;
@@ -337,14 +334,14 @@ with tab_arena:
             function createCar(colorHex) {{
                 const carGroup = new THREE.Group();
                 const bodyGeo = new THREE.BoxGeometry(2.0, 0.6, 3.8);
-                const bodyMat = new THREE.MeshStandardMaterial({{ color: colorHex, roughness: 0.2, metalness: 0.5 }});
+                const bodyMat = new THREE.MeshStandardMaterial({{ color: colorHex, roughness: 0.2, metalness: 0.6 }});
                 const body = new THREE.Mesh(bodyGeo, bodyMat);
                 body.position.y = 0.5;
                 body.castShadow = true;
                 carGroup.add(body);
 
                 const cabinGeo = new THREE.BoxGeometry(1.5, 0.5, 1.8);
-                const cabinMat = new THREE.MeshStandardMaterial({{ color: 0x050505 }});
+                const cabinMat = new THREE.MeshStandardMaterial({{ color: 0x111111 }});
                 const cabin = new THREE.Mesh(cabinGeo, cabinMat);
                 cabin.position.set(0, 0.9, -0.2);
                 carGroup.add(cabin);
@@ -353,8 +350,8 @@ with tab_arena:
                 return carGroup;
             }}
 
-            const car1 = createCar(0xff2244);
-            const car2 = createCar(0x2288ff);
+            const car1 = createCar(0xEF4444); // Bright Red
+            const car2 = createCar(0x2563EB); // Bright Blue
 
             const trackPoints = trackCurve.getSpacedPoints(200);
             function getClosestTrackPoint(pos) {{
@@ -485,8 +482,8 @@ with tab_arena:
                 
                 document.getElementById('game-status').innerText = "🏁 RACE FINISHED!";
                 
-                document.getElementById('winner-text').innerHTML = winner + "<br><span style='color:#fff; font-size:15px;'>Finished in " + elapsedTime + " seconds! Outstanding driving!</span>";
-                document.getElementById('loser-text').innerText = loser + " - Better luck next time! Keep practicing to claim the crown.";
+                document.getElementById('winner-text').innerHTML = winner + "<br><span style='color:#334155; font-size:15px;'>Finished in " + elapsedTime + " seconds! Phenomenal victory!</span>";
+                document.getElementById('loser-text').innerText = loser + " - Better luck next time! Keep practicing to claim the top spot.";
                 document.getElementById('end-modal').style.display = 'block';
             }}
 
@@ -566,15 +563,12 @@ with tab_ranks:
         df_rank = pd.DataFrame.from_dict(st.session_state.leaderboard, orient="index")
         df_rank.index.name = "Driver Name"
         
-        # Calculate Win Rate
         df_rank["Win Rate %"] = ((df_rank["Wins"] / df_rank["Races"]) * 100).round(1)
-        
-        # Sort by Total Points and Fastest Time
         df_rank = df_rank.sort_values(by=["Total Points", "Fastest Time (s)"], ascending=[False, True])
         
         st.dataframe(
-            df_rank.style.highlight_max(axis=0, subset=["Total Points", "Wins"], color="#1f5e32")
-                   .highlight_min(axis=0, subset=["Fastest Time (s)"], color="#1f3e5e"),
+            df_rank.style.highlight_max(axis=0, subset=["Total Points", "Wins"], color="#D1FAE5")
+                   .highlight_min(axis=0, subset=["Fastest Time (s)"], color="#DBEAFE"),
             use_container_width=True
         )
     else:
@@ -631,11 +625,10 @@ req_code = """streamlit>=1.28.0
 pandas>=2.0.0
 """
 
-# Export to gameapp.py and requirements.txt
 with open("gameapp.py", "w") as f:
     f.write(app_code)
 
 with open("requirements.txt", "w") as f:
     f.write(req_code)
 
-print("Export Complete! 'gameapp.py' and 'requirements.txt' generated successfully.")
+print("Export Complete! 'gameapp.py' has been updated with a bright daylight theme.")
