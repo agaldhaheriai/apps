@@ -22,6 +22,8 @@ Then open <http://localhost:8501>.
 | `game_html.py` | The Three.js / Web Audio racing client |
 | `tests/test_core.py` | Unit tests for the player store and room API |
 | `tests/run_headless.py` | Drives a whole race in headless Chromium and checks for JS errors |
+| `tests/run_app_smoke.py` | Runs `app.py` in every lobby state against a stub Streamlit |
+| `tests/run_multiplayer.py` | Two real browsers in one room |
 | `players.json` | Created on first race — every driver, every result |
 
 ---
@@ -176,6 +178,27 @@ coloured ground ring so you can find yourself in a pack.
 
 ---
 
+## Deploying to Streamlit Community Cloud
+
+It runs there, with two caveats.
+
+* **`players.json` is temporary.** Hosted containers have an ephemeral disk, so
+  results are wiped on restart or redeploy. Download the file from the *Player
+  data* panel to keep a season. For a permanent league, run the app on a machine
+  you control, or point `RACE_DATA_PATH` at mounted storage.
+* **Live multiplayer needs the API mount.** Hosted platforms expose exactly one
+  port, so the extra API listener is unreachable there; the app mounts the API on
+  Streamlit's own port instead, which is same-origin and works over HTTPS. If a
+  future Streamlit release moves the internals that mount depends on, the app
+  says so in the room panel and keeps working for solo, hot-seat and the shared
+  leaderboard.
+
+Invite links are built from the address your browser is actually using, so on a
+hosted deployment the QR code carries the public `https://…` URL and anyone can
+join from anywhere.
+
+---
+
 ## Bugs fixed from the original `gameapp.py`
 
 * Results were sent by rewriting the parent URL (`window.parent.location.search`),
@@ -194,6 +217,11 @@ coloured ground ring so you can find yourself in a pack.
   key for new drivers.
 * First lap time was discarded and the finish time double-subtracted the
   countdown (both found and fixed during testing).
+* Room settings were stored but never applied, so two people in one room raced
+  different circuits and lap counts — the host's settings now define the event.
+* The Streamlit API mount could raise `AttributeError` while scanning live
+  objects and take the whole page down; it is fully guarded and now degrades to
+  the standalone port instead.
 
 ---
 
@@ -201,9 +229,14 @@ coloured ground ring so you can find yourself in a pack.
 
 ```bash
 python3 tests/test_core.py        # player store + room API (25 checks)
+python3 tests/run_app_smoke.py    # renders app.py in every lobby state, no Streamlit needed
 python3 tests/run_headless.py     # full race in headless Chromium, checks for JS errors
 python3 tests/run_multiplayer.py  # two real browsers in one room
 ```
+
+`run_app_smoke.py` fakes the Streamlit API and executes `app.py` as the lobby, a
+solo race, a room host, a QR visitor, a hosted HTTPS deployment and a populated
+leaderboard — it catches page-level runtime errors without needing a server.
 
 `run_multiplayer.py` opens two headless browsers against a real room server and
 asserts that each sees the other's car moving, that the host pressing START also

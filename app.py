@@ -41,17 +41,30 @@ PAINTS = {
 def services():
     board = core.Leaderboard()
     rooms = core.RoomManager()
-    try:
-        server = core.GameServer(board, rooms, port=API_PORT)
-    except OSError:
-        server = core.GameServer(board, rooms, port=0)   # port busy → any free one
-    # Preferred path: serve the API from Streamlit's own port, so players only
-    # need one open port and HTTPS deployments stay same-origin.
+
+    # Preferred path: serve the API from Streamlit's own port, so players need
+    # only one open port and hosted HTTPS deployments stay same-origin.
     mounted = core.attach_to_streamlit(board, rooms)
+
+    # Fallback listener on its own port. Hosted platforms often forbid extra
+    # ports, so a failure here is fine as long as the mount worked.
+    server = None
+    for port in (API_PORT, 0):
+        try:
+            server = core.GameServer(board, rooms, port=port)
+            break
+        except Exception:
+            continue
     return server, board, rooms, mounted
 
 
 server, board, rooms, mounted = services()
+api_port = server.port if server else None
+
+if not mounted and not api_port:
+    st.warning("The race server could not start, so multiplayer rooms are unavailable "
+               "in this deployment. Solo and hot-seat racing still work, and results "
+               "are kept in your browser.")
 
 st.markdown(
     """
@@ -120,28 +133,59 @@ qp = st.query_params
 ss = st.session_state
 
 
-def browser_port(default: int = 8501) -> int:
-    """The port this browser is actually connected on."""
+def browser_origin() -> str:
+    """The base URL this browser reached the app on.
+
+    On a hosted deployment (Streamlit Community Cloud and friends) this is the
+    only address other people can use, and it is also the right answer when you
+    opened the app on your LAN address. Falls back to a LAN guess locally.
+    """
     try:
-        host = st.context.headers.get("Host", "")
-        if ":" in host:
-            return int(host.rsplit(":", 1)[1])
+        h = st.context.headers
+        host = h.get("Host") or h.get("host") or ""
+        scheme = (h.get("X-Forwarded-Proto") or h.get("x-forwarded-proto")
+                  or ("https" if ":443" in host else "http"))
+        if host:
+            return f"{scheme}://{host}"
     except Exception:
         pass
-    return default
+    return ""
 
 
-ss.setdefault("mode", "room" if qp.get("room") else None)   # None | "solo" | "room"
+def lan_bases() -> list:
+    """Every base URL that could plausibly reach this app."""
+    bases = []
+    origin = browser_origin()
+    host_only = origin.split("//")[-1]
+    port = 8501
+    if ":" in host_only:
+        try:
+            port = int(host_only.rsplit(":", 1)[1])
+        except ValueError:
+            port = 443 if origin.startswith("https") else 80
+    hosted = bool(origin) and not any(
+        host_only.startswith(p) for p in ("localhost", "127.0.0.1", "0.0.0.0"))
+    if origin and hosted:
+        bases.append(origin)
+    for ip in core.lan_ip_candidates():
+        url = f"http://{ip}:{port}"
+        if url not in bases:
+            bases.append(url)
+    if origin and not hosted:
+        bases.append(origin)              # last: only works on this computer
+    return bases or ["http://localhost:8501"]
+
+
+ss.setdefault("mode", None)                    # None (lobby) | "solo" | "room"
 ss.setdefault("room_code", core.normalize_room(qp.get("room")) if qp.get("room") else "")
 ss.setdefault("driver", (qp.get("name") or "Player1")[:20])
 ss.setdefault("invited", bool(qp.get("room")))
 ss.setdefault("is_host", False)
-ss.setdefault("share_host", core.lan_ip_candidates()[0])
-ss.setdefault("share_port", browser_port())
+ss.setdefault("share_base", lan_bases()[0])
 
 
 def invite_url(room: str) -> str:
-    return f"http://{ss.share_host}:{int(ss.share_port)}/?room={room}"
+    return f"{ss.share_base.rstrip('/')}/?room={room}"
 
 
 def qr_image_html(url: str, size: int = 210) -> str:
@@ -239,8 +283,9 @@ with st.sidebar:
     view_h = st.slider("Arena height (px)", 420, 1000, 640, 20)
 
     st.divider()
-    st.caption(("API on Streamlit's own port ✅" if mounted
-                else f"API on port {server.port}") + f" · data `{os.path.basename(core.DATA_PATH)}`")
+    st.caption(("Race API on Streamlit's own port ✅" if mounted
+                else (f"Race API on port {api_port}" if api_port else "Race API unavailable"))
+               + f" · data `{os.path.basename(core.DATA_PATH)}`")
 
 
 # --------------------------------------------------------------------------
@@ -317,6 +362,17 @@ def room_panel(track: int, laps: int, power: int) -> None:
                                 "power": int(power), "host": ss.driver})
     url = invite_url(room)
     st.markdown("### 🌐 Room " + room)
+    if not mounted and not api_port:
+        st.markdown('<div class="warn">Live multiplayer is not available in this '
+                    'deployment — the race server could not start. Everyone can still '
+                    'race the same circuit and compare times on the leaderboard.</div>',
+                    unsafe_allow_html=True)
+    elif not mounted and browser_origin().startswith("https"):
+        st.markdown(f'<div class="warn">This is a hosted deployment and the race API '
+                    f'could not attach to the app\'s own port, so it is only reachable '
+                    f'on port {api_port} — which hosted platforms block. Cars from other '
+                    f'players will not appear here; run the app on your own machine or '
+                    f'network for live racing.</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.25, 1.35])
 
     with c1:
@@ -329,33 +385,48 @@ def room_panel(track: int, laps: int, power: int) -> None:
         st.markdown("**Invite link**")
         st.code(url, language=None)
 
-        ips = core.lan_ip_candidates()
-        options = ips + (["localhost"] if "localhost" not in ips else [])
-        if ss.share_host not in options:
-            options.insert(0, ss.share_host)
-        ss.share_host = st.selectbox(
+        bases = lan_bases()
+        options = bases + ["Custom…"]
+        if ss.share_base not in bases:
+            options.insert(0, ss.share_base)
+        choice = st.selectbox(
             "Address other players use", options,
-            index=options.index(ss.share_host),
-            help="Pick the address of the network your phone is on. A VPN or virtual "
-                 "adapter address will not be reachable.")
-        ss.share_port = st.number_input("Port", 1, 65535, int(ss.share_port))
+            index=options.index(ss.share_base) if ss.share_base in options else 0,
+            help="Whatever you pick here is what the QR code encodes. On a hosted "
+                 "deployment use the public URL; on your own network use the LAN "
+                 "address of the Wi-Fi your phone is on.")
+        if choice == "Custom…":
+            ss.share_base = st.text_input("Custom base URL", value=ss.share_base)
+        else:
+            ss.share_base = choice
 
-        if ss.share_host in ("localhost", "127.0.0.1"):
-            st.markdown('<div class="warn">A QR code pointing at <b>localhost</b> can '
-                        'only ever open on this computer. Choose a 192.168.x / 10.x '
-                        'address above.</div>', unsafe_allow_html=True)
-        if st.button("🔎 Check that phones can reach this"):
-            ok = core.port_reachable(ss.share_host, int(ss.share_port))
-            if ok:
+        host_only = ss.share_base.split("//")[-1].split("/")[0]
+        host_name = host_only.rsplit(":", 1)[0] if ":" in host_only else host_only
+        try:
+            host_port = int(host_only.rsplit(":", 1)[1]) if ":" in host_only else (
+                443 if ss.share_base.startswith("https") else 80)
+        except ValueError:
+            host_port = 8501
+
+        if host_name in ("localhost", "127.0.0.1", "0.0.0.0"):
+            st.markdown('<div class="warn">A link pointing at <b>localhost</b> only '
+                        'ever opens on this computer. Pick a 192.168.x / 10.x address '
+                        'so a phone can reach you.</div>', unsafe_allow_html=True)
+        if st.button("🔎 Check that other devices can reach this"):
+            if ss.share_base.startswith("https"):
+                st.markdown('<div class="good">This is a hosted address — anyone with '
+                            'the link can join, no firewall changes needed.</div>',
+                            unsafe_allow_html=True)
+            elif core.port_reachable(host_name, host_port):
                 st.markdown('<div class="good">Port is open on that address. If a phone '
                             'still cannot load it, the two devices are on different '
                             'networks (guest Wi-Fi, or mobile data).</div>',
                             unsafe_allow_html=True)
             else:
                 st.markdown(
-                    '<div class="warn">Nothing is listening on that address. Restart '
-                    'with <code>streamlit run app.py --server.address 0.0.0.0</code> '
-                    'and allow the port through your firewall.</div>',
+                    '<div class="warn">Nothing answered on that address. Restart with '
+                    '<code>streamlit run app.py --server.address 0.0.0.0</code> and '
+                    'allow the port through your firewall.</div>',
                     unsafe_allow_html=True)
         if st.button("🚪 Leave room"):
             ss.mode, ss.room_code, ss.invited, ss.is_host = None, "", False, False
@@ -426,7 +497,7 @@ cfg = {
     "color1": PAINTS[c1_name],
     "color2": PAINTS[c2_name],
     "apiPrefix": core.API_PREFIX if mounted else None,
-    "apiPort": int(server.port),
+    "apiPort": int(api_port) if api_port else None,
     "room": ss.room_code or None,
 }
 
@@ -499,6 +570,10 @@ with board_col:
     with st.expander("💾 Player data (players.json)"):
         st.caption("Everything is stored in this one file — download it to keep a backup "
                    "or move the league to another machine.")
+        if browser_origin().startswith("https"):
+            st.caption("⚠️ On a hosted deployment the file lives on a temporary disk and "
+                       "is wiped when the app restarts or redeploys. Download it if you "
+                       "want to keep a season's results.")
         st.download_button("⬇️ Download players.json", board.export_json(),
                            "players.json", "application/json", use_container_width=True)
         rows = board.standings(500)
@@ -549,7 +624,8 @@ not a VPN address. Start Streamlit with `--server.address 0.0.0.0`, allow the po
 your firewall, and use **Check that phones can reach this** in the room panel.
 {"The race API is served on Streamlit's own port, so one open port is all you need."
  if mounted else
- f"The race API is on port {server.port}, so that port needs to be open too."}
+ (f"The race API is on port {api_port}, so that port needs to be open too."
+  if api_port else "The race API could not start in this deployment.")}
 
 **Player data.** Every finished race is appended to `{os.path.basename(core.DATA_PATH)}`
 with position, total time, best lap, top speed and contacts. Points are Formula-style and
@@ -559,4 +635,5 @@ scale with engine class.
 
 st.caption(f"Turbo Racing League · circuit {track} · {laps} laps · engine {power}/5 · "
            f"host {socket.gethostname()} · "
-           + ("API mounted on Streamlit" if mounted else f"API :{server.port}"))
+           + ("API mounted on Streamlit" if mounted
+              else (f"API :{api_port}" if api_port else "API offline")))

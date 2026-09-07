@@ -493,7 +493,19 @@ API_PREFIX = "/racing/api"
 
 def attach_to_streamlit(board: Leaderboard, rooms: RoomManager,
                         prefix: str = API_PREFIX) -> bool:
-    """Add the racing API to the Tornado app Streamlit is already running."""
+    """Add the racing API to the Tornado app Streamlit is already running.
+
+    Best-effort by design: this reaches into another library's internals, so
+    every step is guarded and any failure just means the game falls back to the
+    standalone API port. It must never take the app down with it.
+    """
+    try:
+        return _attach_to_streamlit(board, rooms, prefix)
+    except Exception:
+        return False
+
+
+def _attach_to_streamlit(board: Leaderboard, rooms: RoomManager, prefix: str) -> bool:
     try:
         import gc
 
@@ -501,7 +513,15 @@ def attach_to_streamlit(board: Leaderboard, rooms: RoomManager,
     except Exception:
         return False
 
-    apps = [o for o in gc.get_objects() if isinstance(o, tornado.web.Application)]
+    # Some objects on the heap raise from __class__ lookups, so isinstance()
+    # gets its own guard rather than being trusted inside a comprehension.
+    apps = []
+    for obj in gc.get_objects():
+        try:
+            if isinstance(obj, tornado.web.Application):
+                apps.append(obj)
+        except Exception:
+            continue
     if not apps:
         return False
 
@@ -523,7 +543,11 @@ def attach_to_streamlit(board: Leaderboard, rooms: RoomManager,
             self.finish(json.dumps({"ok": True}))
 
         def _run(self, method, endpoint):
-            query = {k: v[0].decode() for k, v in self.request.query_arguments.items()}
+            query = {}
+            for k, v in self.request.query_arguments.items():
+                key = k.decode() if isinstance(k, bytes) else k
+                val = v[0] if v else b""
+                query[key] = val.decode() if isinstance(val, bytes) else str(val)
             data = {}
             if method == "POST" and self.request.body:
                 try:
