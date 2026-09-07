@@ -1,355 +1,405 @@
-# Import required system libraries
-import json  # Library to handle JSON serialization
-import urllib.request  # Library to make HTTP API requests
-import pandas as pd  # Library for data manipulation and tabular display
-import streamlit as st  # Main web application framework
-import streamlit.components.v1 as components  # Module to embed custom HTML5/JavaScript canvas
+# Import system libraries
+import streamlit as st  # Main web framework
+import pandas as pd  # Data manipulation library
+import streamlit.components.v1 as components  # Embedded HTML/JS renderer
 
-# Set page configuration to wide layout and custom title
+# Set page configuration for 3D game layout
 st.set_page_config(
-    page_title="2-Player Turbo Racers", layout="wide", page_icon="🏎️"
+    page_title="3D Turbo Racing League", layout="wide", page_icon="🏎️"
 )
 
+# Initialize Session State Data Structures
+if "sessions" not in st.session_state:  # Open multi-player game lobbies
+    st.session_state.sessions = {
+        "Session #101 (Speedway)": {"host": "ProRacer", "players": ["ProRacer"], "max": 2, "status": "Waiting"},
+        "Session #102 (Circuit)": {"host": "DriftKing", "players": ["DriftKing"], "max": 2, "status": "Waiting"}
+    }
 
-# Function to fetch employee data from external API endpoint
-@st.cache_data(ttl=300)  # Cache API response for 5 minutes to reduce latency
-def fetch_employees():  # Define API fetch routine
-    url = "http://shelfcorp.atwebpages.com/api/employees.json"  # Target JSON API endpoint
-    try:  # Handle network operations safely
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "Mozilla/5.0"}
-        )  # Add user-agent header to avoid blocks
-        with urllib.request.urlopen(req, timeout=5) as response:  # Send HTTP GET request with 5s timeout
-            data = json.loads(
-                response.read().decode()
-            )  # Decode and parse JSON payload
-            # Handle list or object response structure safely
-            if isinstance(data, list):  # Check if response is array
-                names = [
-                    item.get("name") or item.get("employee_name") or str(item)
-                    for item in data
-                ]  # Extract name keys
-            elif isinstance(data, dict):  # Check if response is dictionary object
-                names = [
-                    v.get("name") if isinstance(v, dict) else str(v)
-                    for v in data.values()
-                ]  # Extract values
-            else:  # Fallback for alternative types
-                names = []  # Default empty list
-            return [n for n in names if n]  # Filter out empty entries
-    except Exception as e:  # Catch network or parsing failures
-        st.warning(
-            f"Could not load live API data ({e}). Using local fallback drivers."
-        )  # Display user notification
-        return [
-            "Alex Pro",
-            "Sam Speed",
-            "Jordan Drift",
-            "Taylor Turbo",
-            "Morgan Nitro",
-        ]  # Return fallback driver names
+if "registered_users" not in st.session_state:  # Persistent player catalog
+    st.session_state.registered_users = ["ProRacer", "DriftKing", "TurboMax"]
+
+if "leaderboard" not in st.session_state:  # Global rank scoreboard
+    st.session_state.leaderboard = {}
+
+if "current_user" not in st.session_state:  # Active player name
+    st.session_state.current_user = "Racer1"
 
 
-# Initialize session state for persistent scoreboard and user stats
-if (
-    "leaderboard" not in st.session_state
-):  # Check if leaderboard data exists in memory
-    st.session_state.leaderboard = {}  # Initialize empty dictionary structure
+# Helper function to process score updates
+def record_win(winner, time_sec, speed_lvl):  # Update global rankings
+    if winner not in st.session_state.leaderboard:  # Add user if missing
+        st.session_state.leaderboard[winner] = {
+            "Wins": 0, "Total Points": 0, "Fastest Time (s)": 999.0, "Races": 0
+        }
+    entry = st.session_state.leaderboard[winner]  # Access reference
+    entry["Wins"] += 1  # Increment total wins
+    entry["Total Points"] += 150 * speed_lvl  # Multiply score by speed level
+    entry["Races"] += 1  # Increment race counter
+    if time_sec < entry["Fastest Time (s)"]:  # Update personal record
+        entry["Fastest Time (s)"] = round(time_sec, 2)
 
 
-# Function to record race results and update running scores dynamically
-def update_scores(winner_name, race_time, speed_level):  # Define score update routine
-    if winner_name not in st.session_state.leaderboard:  # Check if driver exists in records
-        st.session_state.leaderboard[winner_name] = {  # Create new driver record entry
-            "Wins": 0,  # Total win count
-            "Total Score": 0,  # Aggregate points score
-            "Fastest Time (s)": 999.0,  # Best recorded finish time
-            "Races Played": 0,  # Total matches played
-        }  # End dictionary assignment
+# App Header Setup
+st.title("🏎️ 3D Low-Poly Multi-Player Racing Engine")  # Application Title
+st.caption("Low-poly 3D graphics powered by Three.js & WebGL")  # Engine subtitle
 
-    # Calculate points based on selected speed level multiplier (Speed Level 1 to 5)
-    points_earned = 100 * speed_level  # Higher speed levels grant higher point rewards
-    driver = st.session_state.leaderboard[winner_name]  # Get driver reference
-    driver["Wins"] += 1  # Increment win count by 1
-    driver["Total Score"] += points_earned  # Add earned points to running total
-    driver["Races Played"] += 1  # Increment match counter
-    if race_time < driver["Fastest Time (s)"]:  # Check if current time beats record
-        driver["Fastest Time (s)"] = round(
-            race_time, 2
-        )  # Update fastest time record
+# Primary Navigation Tabs
+tab_player, tab_arena, tab_lobbies, tab_ranks = st.tabs([
+    "👤 Player Setup", "🏁 3D Race Arena", "🌐 Game Lobbies", "🏆 Leaderboard"
+])
 
+# --- TAB 1: PLAYER REGISTRATION & SETUP ---
+with tab_player:  # Configure User Name and Profile
+    st.subheader("Register / Select Player Name")  # Section title
+    col_a, col_b = st.columns(2)  # Two-column layout
+    
+    with col_a:  # New player registration form
+        new_name = st.text_input("Enter New Player Name:", placeholder="e.g. SpeedDemon99")  # Input box
+        if st.button("Save & Select Name"):  # Save action button
+            if new_name.strip():  # Validate input string
+                clean_name = new_name.strip()  # Clean whitespace
+                if clean_name not in st.session_state.registered_users:  # Check duplicates
+                    st.session_state.registered_users.append(clean_name)  # Register new name
+                st.session_state.current_user = clean_name  # Set active driver
+                st.success(f"Driver profile updated to: **{clean_name}**")  # Success notification
+            else:  # Empty string warning
+                st.warning("Please enter a valid player name.")  # Warning message
 
-# Fetch driver choices from API
-driver_list = fetch_employees()  # Call API fetching function
+    with col_b:  # Dropdown selector for saved profiles
+        selected_profile = st.selectbox(
+            "Select Existing Player Profile:",
+            st.session_state.registered_users,
+            index=0 if st.session_state.current_user not in st.session_state.registered_users 
+            else st.session_state.registered_users.index(st.session_state.current_user)
+        )  # Dropdown choice
+        if st.button("Switch Profile"):  # Switch action button
+            st.session_state.current_user = selected_profile  # Set selected driver
+            st.info(f"Switched driver to: **{selected_profile}**")  # Status info
 
-# Render application header
-st.title("🏎️ Interactive 2-Player Canvas Racing Engine")  # Main header text
-st.caption(
-    "Real-time dual-input arcade racer powered by Python & HTML5 Canvas"
-)  # Subtitle caption
+    st.divider()  # Visual divider
+    st.markdown(f"**Current Driver Active:** `{st.session_state.current_user}`")  # Active status banner
 
-# Create navigation tabs for Game Arena and Leaderboard
-tab1, tab2 = st.tabs(
-    ["🏁 Race Track Arena", "🏆 Global Leaderboard"]
-)  # Define Streamlit tabs
-
-with tab1:  # Game Arena Tab Context
-    col1, col2, col3 = st.columns(
-        [1, 1, 1]
-    )  # Setup 3-column layout for player selections
-
-    with col1:  # Player 1 configuration column
-        p1_name = st.selectbox(
-            "Select Player 1 (Red Car)",
-            driver_list,
-            index=0,
-            key="p1_select",  # Dropdown menu for Player 1
-        )  # Assign selected driver
-
-    with col2:  # Player 2 configuration column
-        # Ensure default index doesn't conflict if list contains multiple items
-        default_p2 = 1 if len(driver_list) > 1 else 0  # Fallback index check
-        p2_name = st.selectbox(
-            "Select Player 2 (Blue Car)",
-            driver_list,
-            index=default_p2,
-            key="p2_select",  # Dropdown menu for Player 2
-        )  # Assign selected driver
-
-    with col3:  # Engine performance selection column
-        speed_level = st.slider(
-            "🏎️ Engine Speed Level (1-5)",
-            min_value=1,
-            max_value=5,
-            value=3,
-            key="speed_lvl",  # Speed level selection slider
-        )  # Assign speed multiplier
+# --- TAB 2: 3D RACE ARENA ---
+with tab_arena:  # Main 3D Low-Poly Game Loop
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])  # Configuration columns
+    
+    with col1:  # Player 1 designation
+        p1_driver = st.text_input("Player 1 (Red Car):", value=st.session_state.current_user, key="p1_val")  # P1 Name
+    with col2:  # Player 2 designation
+        p2_driver = st.text_input("Player 2 (Blue Car):", value="Racer2", key="p2_val")  # P2 Name
+    with col3:  # Game Speed level selection
+        speed_lvl = st.slider("Speed Engine Level (1-5)", 1, 5, 3, key="speed_setting")  # Speed level
+    with col4:  # Camera perspective view selector
+        camera_view = st.selectbox("3D Camera Perspective:", ["Chase Cam (Behind)", "Third-Person (High)", "Top-Down (Map)"])  # Camera view
 
     st.markdown(
-        "**🎮 Controls:** **P1 (Red):** `W` (Accelerate), `A` (Steer Left), `D` (Steer Right) | **P2 (Blue):** `Up Arrow` (Accelerate), `Left Arrow` (Steer Left), `Right Arrow` (Steer Right)"
-    )  # On-screen control instructions
+        "**🎮 Controls:** **P1 (Red):** `W` (Gas), `A` (Left), `D` (Right), `S` (Reverse) | **P2 (Blue):** `Up Arrow` (Gas), `Left Arrow`, `Right Arrow`, `Down Arrow`"
+    )  # Controls bar
 
-    # HTML5/JS Game Loop injected directly into Streamlit
-    game_html = f"""
-    <!DOCTYPE html> <!-- HTML5 Document Type Declaration -->
-    <html> <!-- Root HTML Element -->
-    <head> <!-- Header Element -->
-        <style> /* CSS Styling for Canvas Arena */
-            body {{ margin: 0; padding: 0; background-color: #111; font-family: sans-serif; color: white; text-align: center; }} /* Page Body Setup */
-            canvas {{ background: #222; border: 4px solid #444; border-radius: 8px; display: block; margin: 10px auto; }} /* Canvas Styling */
-            .ui-panel {{ font-size: 18px; font-weight: bold; margin-bottom: 5px; }} /* HUD Text Styling */
-        </style> <!-- End CSS Styling -->
-    </head> <!-- End Header -->
-    <body> <!-- Body Element -->
-        <div class="ui-panel"> Race Status: <span id="status" style="color: #00FF00;">Ready to Start! Drive 3 Laps!</span></div> <!-- HUD Status Text -->
-        <canvas id="raceCanvas" width="800" height="500"></canvas> <!-- Game Canvas Rendering Target -->
+    # Embed Three.js 3D Racing Engine HTML/JS Code
+    threejs_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ margin: 0; overflow: hidden; background-color: #87CEEB; font-family: sans-serif; }}
+            #hud {{ position: absolute; top: 10px; left: 10px; color: white; font-weight: bold; font-size: 16px; text-shadow: 2px 2px 4px #000; z-index: 10; }}
+            canvas {{ display: block; width: 100vw; height: 520px; }}
+        </style>
+        <!-- Import Three.js via CDN -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    </head>
+    <body>
+        <div id="hud">
+            🏁 3D Low-Poly Circuit | Speed Lvl: {speed_lvl}<br>
+            <span id="p1-hud" style="color: #ff4444;">{p1_driver}: Lap 0/3</span> | 
+            <span id="p2-hud" style="color: #4488ff;">{p2_driver}: Lap 0/3</span><br>
+            <span id="game-status" style="color: #yellow;">Press W/Up to Start Race!</span>
+        </div>
+        <script>
+            // Scene & Renderer Setup
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue background
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 150); // Environmental fog effect
 
-        <script> /* Start Embedded JavaScript Arcade Engine */
-            const canvas = document.getElementById("raceCanvas"); /* Get Canvas DOM Reference */
-            const ctx = canvas.getContext("2d"); /* Obtain 2D Rendering Context */
+            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / 520, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({{ antialias: true }});
+            renderer.setSize(window.innerWidth, 520);
+            renderer.shadowMap.enabled = true; // Enable shadow maps
+            document.body.appendChild(renderer.domElement);
 
-            // Game Settings & Configuration Parameters
-            const speedMultiplier = {speed_level}; /* Speed Level set from Python Slider */
-            const baseSpeed = 1.5 + (speedMultiplier * 0.8); /* Calculate max velocity threshold */
-            const turnSpeed = 0.05; /* Steering sensitivity angle increment */
-            const totalLaps = 3; /* Total laps required to win race */
+            // Lighting setup (Low-Poly aesthetic lighting)
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
 
-            // Key Input Listener States
-            const keys = {{}}; /* Object tracking held key events */
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(50, 80, 50);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
 
-            // Player 1 Object State (Red Car)
-            const p1 = {{
-                name: "{p1_name}", x: 380, y: 430, angle: 0, speed: 0, 
-                color: "#FF3333", lap: 0, crossed: false, finishTime: null
-            }};
+            // Track Circuit Parameters (Oval Loop)
+            const trackRadiusX = 40;
+            const trackRadiusZ = 25;
 
-            // Player 2 Object State (Blue Car)
-            const p2 = {{
-                name: "{p2_name}", x: 420, y: 430, angle: 0, speed: 0, 
-                color: "#3388FF", lap: 0, crossed: false, finishTime: null
-            }};
+            // Generate Low-Poly Ground & Track
+            const groundGeo = new THREE.PlaneGeometry(200, 200);
+            const groundMat = new THREE.MeshLambertMaterial({{ color: 0x55aa55 }}); // Green grass
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
 
-            let raceStartTime = Date.now(); /* Record timestamp at game load */
-            let gameOver = false; /* Master race state flag */
+            // Create Oval Track Shape
+            const trackShape = new THREE.Shape();
+            trackShape.absellipse(0, 0, trackRadiusX + 6, trackRadiusZ + 6, 0, Math.PI * 2, false, 0);
+            const holePath = new THREE.Path();
+            holePath.absellipse(0, 0, trackRadiusX - 6, trackRadiusZ - 6, 0, Math.PI * 2, true, 0);
+            trackShape.holes.push(holePath);
 
-            // Keydown Event Listener
-            window.addEventListener("keydown", (e) => {{ keys[e.key] = true; }}); /* Flag key pressed */
-            // Keyup Event Listener
-            window.addEventListener("keyup", (e) => {{ keys[e.key] = false; }}); /* Flag key released */
+            const trackGeo = new THREE.ShapeGeometry(trackShape);
+            const trackMat = new THREE.MeshLambertMaterial({{ color: 0x333333 }}); // Dark asphalt track
+            const trackMesh = new THREE.Mesh(trackGeo, trackMat);
+            trackMesh.rotation.x = -Math.PI / 2;
+            trackMesh.position.y = 0.01;
+            scene.add(trackMesh);
 
-            // Track Finish Line Parameters (Coordinates)
-            const finishLine = {{ x1: 350, y1: 400, x2: 450, y2: 460 }}; /* Define start/finish checkpoint zone */
+            // Add Red/White Curb Edges
+            const curbGeo = new THREE.RingGeometry(trackRadiusX - 6.5, trackRadiusX - 6, 64);
+            const curbMat = new THREE.MeshBasicMaterial({{ color: 0xff2222, side: THREE.DoubleSide }});
+            const curb = new THREE.Mesh(curbGeo, curbMat);
+            curb.rotation.x = -Math.PI / 2;
+            curb.position.y = 0.02;
+            scene.add(curb);
 
-            // Main Physics & Movement Update Loop Function
-            function updateCar(car, upKey, leftKey, rightKey) {{
-                if (gameOver) return; /* Freeze physics updates if race finished */
+            // Low-Poly Pine Trees Environment Setup
+            function createPineTree(x, z) {{
+                const group = new THREE.Group();
+                const trunkGeo = new THREE.CylinderGeometry(0.3, 0.5, 2, 5);
+                const trunkMat = new THREE.MeshLambertMaterial({{ color: 0x8B4513 }});
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.y = 1;
+                group.add(trunk);
 
-                // Acceleration Logic
-                if (keys[upKey]) {{
-                    car.speed = Math.min(car.speed + 0.1, baseSpeed); /* Accelerate car up to baseSpeed limit */
-                }} else {{
-                    car.speed = Math.max(car.speed - 0.05, 0); /* Apply natural deceleration friction */
-                }}
+                const leavesGeo = new THREE.ConeGeometry(2, 5, 5); // 5-sided low-poly cone
+                const leavesMat = new THREE.MeshLambertMaterial({{ color: 0x2e6f40 }});
+                const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+                leaves.position.y = 3.5;
+                group.add(leaves);
 
-                // Steering Logic
-                if (keys[leftKey] && car.speed > 0) {{ car.angle -= turnSpeed; }} /* Rotate counter-clockwise */
-                if (keys[rightKey] && car.speed > 0) {{ car.angle += turnSpeed; }} /* Rotate clockwise */
+                group.position.set(x, 0, z);
+                scene.add(group);
+            }}
 
-                // Position Translation based on Angular Vector Trigonometry
-                car.x += Math.sin(car.angle) * car.speed; /* Calculate X delta movement */
-                car.y -= Math.cos(car.angle) * car.speed; /* Calculate Y delta movement */
+            // Place Pine Trees around perimeter
+            for (let i = 0; i < 20; i++) {{
+                const angle = (i / 20) * Math.PI * 2;
+                createPineTree(Math.cos(angle) * (trackRadiusX + 15), Math.sin(angle) * (trackRadiusZ + 15));
+                createPineTree(Math.cos(angle) * (trackRadiusX - 12), Math.sin(angle) * (trackRadiusZ - 12));
+            }}
 
-                // Outer Boundary Collision Checks (Canvas Walls)
-                if (car.x < 20 || car.x > 780 || car.y < 20 || car.y > 480) {{
-                    car.speed = -0.5; /* Bounce back penalty on wall crash */
-                }}
+            // Low-Poly Car Factory Function
+            function createCar(colorHex) {{
+                const carGroup = new THREE.Group();
+                
+                // Chassis Box
+                const bodyGeo = new THREE.BoxGeometry(1.8, 0.7, 3.2);
+                const bodyMat = new THREE.MeshLambertMaterial({{ color: colorHex }});
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.position.y = 0.5;
+                body.castShadow = true;
+                carGroup.add(body);
 
-                // Lap Counter Detection Logic
-                if (car.x > finishLine.x1 && car.x < finishLine.x2 && car.y > finishLine.y1 && car.y < finishLine.y2) {{
-                    if (!car.crossed) {{ /* Check for new lap trigger */
-                        car.lap++; /* Increment completed lap count */
-                        car.crossed = true; /* Set crossing lock flag */
-                        if (car.lap >= totalLaps && !gameOver) {{ /* Winner check condition */
-                            gameOver = true; /* Set race finished flag */
-                            car.finishTime = ((Date.now() - raceStartTime) / 1000).toFixed(2); /* Compute final duration */
-                            document.getElementById("status").innerText = car.name + " WINS in " + car.finishTime + "s!"; /* Display HUD message */
-                        }}
+                // Cabin Glass
+                const cabinGeo = new THREE.BoxGeometry(1.4, 0.6, 1.6);
+                const cabinMat = new THREE.MeshLambertMaterial({{ color: 0x111111 }});
+                const cabin = new THREE.Mesh(cabinGeo, cabinMat);
+                cabin.position.set(0, 1.0, -0.2);
+                carGroup.add(cabin);
+
+                // 4 Wheels
+                const wheelGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.3, 8);
+                const wheelMat = new THREE.MeshLambertMaterial({{ color: 0x222222 }});
+                const positions = [[-0.95, 0.35, 1], [0.95, 0.35, 1], [-0.95, 0.35, -1], [0.95, 0.35, -1]];
+                
+                positions.forEach(pos => {{
+                    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+                    wheel.rotation.z = Math.PI / 2;
+                    wheel.position.set(pos[0], pos[1], pos[2]);
+                    carGroup.add(wheel);
+                }});
+
+                scene.add(carGroup);
+                return carGroup;
+            }}
+
+            // Create Player 1 (Red) and Player 2 (Blue) Cars
+            const car1 = createCar(0xff3333); // Red P1
+            const car2 = createCar(0x3388ff); // Blue P2
+
+            // Initial Car Placement
+            car1.position.set(0, 0, trackRadiusZ);
+            car2.position.set(0, 0, trackRadiusZ + 2.5);
+
+            // Game State Variables
+            const p1State = {{ x: 0, z: trackRadiusZ, angle: Math.PI/2, speed: 0, lap: 0, crossed: false }};
+            const p2State = {{ x: 0, z: trackRadiusZ + 2.5, angle: Math.PI/2, speed: 0, lap: 0, crossed: false }};
+            const maxSpeed = 0.3 + ({speed_lvl} * 0.12);
+            const keys = {{}};
+
+            // Keyboard Listeners
+            window.addEventListener('keydown', e => keys[e.key] = true);
+            window.addEventListener('keyup', e => keys[e.key] = false);
+
+            // Physics Update Logic
+            function updatePhysics(carMesh, state, forwardKey, leftKey, rightKey, backKey) {{
+                if (keys[forwardKey]) state.speed = Math.min(state.speed + 0.01, maxSpeed);
+                else if (keys[backKey]) state.speed = Math.max(state.speed - 0.01, -maxSpeed * 0.5);
+                else state.speed *= 0.95; // Friction
+
+                if (keys[leftKey] && Math.abs(state.speed) > 0.01) state.angle += 0.04;
+                if (keys[rightKey] && Math.abs(state.speed) > 0.01) state.angle -= 0.04;
+
+                state.x += Math.sin(state.angle) * state.speed;
+                state.z += Math.cos(state.angle) * state.speed;
+
+                carMesh.position.set(state.x, 0, state.z);
+                carMesh.rotation.y = state.angle;
+
+                // Simple Lap Detection (Crossing X=0 Line)
+                if (Math.abs(state.x) < 3 && state.z > 15) {{
+                    if (!state.crossed) {{
+                        state.lap++;
+                        state.crossed = true;
                     }}
                 }} else {{
-                    car.crossed = false; /* Reset crossing lock flag once car exits line */
+                    state.crossed = false;
                 }}
             }}
 
-            // Drawing Engine Routine (Canvas Graphics Context)
-            function drawTrack() {{
-                ctx.clearRect(0, 0, canvas.width, canvas.height); /* Clear previous frame */
+            // Selected Camera View Mode Logic
+            const camView = "{camera_view}";
 
-                // Outer Grass Background
-                ctx.fillStyle = "#2e7d32"; /* Dark Green background color */
-                ctx.fillRect(0, 0, canvas.width, canvas.height); /* Fill full canvas */
-
-                // Outer Race Track Oval Circuit
-                ctx.fillStyle = "#555555"; /* Asphalt gray color */
-                ctx.beginPath(); /* Begin vector path */
-                ctx.ellipse(400, 250, 350, 200, 0, 0, 2 * Math.PI); /* Outer oval path */
-                ctx.fill(); /* Render asphalt filled shape */
-
-                // Inner Field Grass Island
-                ctx.fillStyle = "#2e7d32"; /* Center island grass color */
-                ctx.beginPath(); /* Begin vector path */
-                ctx.ellipse(400, 250, 200, 100, 0, 0, 2 * Math.PI); /* Inner oval path */
-                ctx.fill(); /* Cut out inner field */
-
-                // Start/Finish Line Indicator
-                ctx.strokeStyle = "#FFFFFF"; /* White line color */
-                ctx.lineWidth = 6; /* Set stroke width */
-                ctx.beginPath(); /* Begin vector path */
-                ctx.moveTo(400, 350); /* Start position */
-                ctx.lineTo(400, 450); /* End position */
-                ctx.stroke(); /* Render check line */
+            function updateCamera() {{
+                if (camView === "Chase Cam (Behind)") {{
+                    // Follow Red Car from Behind
+                    camera.position.x = car1.position.x - Math.sin(p1State.angle) * 12;
+                    camera.position.z = car1.position.z - Math.cos(p1State.angle) * 12;
+                    camera.position.y = car1.position.y + 6;
+                    camera.lookAt(car1.position.x, car1.position.y + 1, car1.position.z);
+                }} else if (camView === "Third-Person (High)") {{
+                    // High Isometric Angle
+                    camera.position.set(0, 45, 45);
+                    camera.lookAt(0, 0, 0);
+                }} else {{
+                    // Overhead Map View
+                    camera.position.set(0, 70, 0.1);
+                    camera.lookAt(0, 0, 0);
+                }}
             }}
 
-            // Render Car Vehicle Graphics Representation
-            function drawCar(car) {{
-                ctx.save(); /* Save canvas state context */
-                ctx.translate(car.x, car.y); /* Translate origin to car coordinates */
-                ctx.rotate(car.angle); /* Rotate canvas context to car heading */
-                
-                // Vehicle Body Box
-                ctx.fillStyle = car.color; /* Set specific player car color */
-                ctx.fillRect(-10, -18, 20, 36); /* Draw main chassis rectangle */
+            // Main Animation Render Loop
+            function animate() {{
+                requestAnimationFrame(animate);
 
-                // Windshield Detail
-                ctx.fillStyle = "#111"; /* Dark windshield color */
-                ctx.fillRect(-7, -8, 14, 10); /* Draw glass block */
+                // Update Player Controls
+                updatePhysics(car1, p1State, 'w', 'a', 'd', 's');
+                updatePhysics(car2, p2State, 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'ArrowDown');
 
-                ctx.restore(); /* Restore base canvas context */
+                // Update HUD Text
+                document.getElementById('p1-hud').innerText = "{p1_driver}: Lap " + Math.min(p1State.lap, 3) + "/3";
+                document.getElementById('p2-hud').innerText = "{p2_driver}: Lap " + Math.min(p2State.lap, 3) + "/3";
 
-                // Render Overhead Driver Name Tag and Lap HUD
-                ctx.fillStyle = "#FFFFFF"; /* White text color */
-                ctx.font = "12px sans-serif"; /* Font styling */
-                ctx.fillText(car.name + " (Lap " + Math.min(car.lap, totalLaps) + "/" + totalLaps + ")", car.x - 30, car.y - 25); /* Draw label above car */
+                if (p1State.lap >= 3) {{
+                    document.getElementById('game-status').innerText = "🎉 {p1_driver} (Red Car) WINS THE RACE!";
+                }} else if (p2State.lap >= 3) {{
+                    document.getElementById('game-status').innerText = "🎉 {p2_driver} (Blue Car) WINS THE RACE!";
+                }}
+
+                updateCamera();
+                renderer.render(scene, camera);
             }}
 
-            // Primary RequestAnimationFrame Game Loop Engine
-            function gameLoop() {{
-                // Update Player Physics
-                updateCar(p1, "w", "a", "d"); /* Process P1 W/A/D keyboard state */
-                updateCar(p2, "ArrowUp", "ArrowLeft", "ArrowRight"); /* Process P2 Arrow keys state */
+            animate(); // Start animation loop
+        </script>
+    </body>
+    </html>
+    """
 
-                // Render Scene Frame
-                drawTrack(); /* Draw background circuit */
-                drawCar(p1); /* Draw P1 vehicle */
-                drawCar(p2); /* Draw P2 vehicle */
+    # Render HTML5/3D Component in Streamlit
+    components.html(threejs_html, height=550)  # Embedded webgl component
 
-                requestAnimationFrame(gameLoop); /* Schedule next frame render step */
-            }}
+    # Score recording section
+    st.subheader("🏁 Submit Match Score")  # Section title
+    sc_col1, sc_col2, sc_col3 = st.columns([2, 2, 1])  # Column layout
+    
+    with sc_col1:  # Winner selection dropdown
+        winner_name = st.selectbox("Race Winner:", [p1_driver, p2_driver], key="winner_drop")  # Winner name
+    with sc_col2:  # Race duration time input
+        finish_sec = st.number_input("Finish Time (Seconds):", min_value=5.0, max_value=300.0, value=22.5, step=0.5)  # Time
+    with sc_col3:  # Submit button
+        st.write("")  # Spacing
+        st.write("")  # Spacing
+        if st.button("Save Result", use_container_width=True):  # Save trigger
+            record_win(winner_name, finish_sec, speed_lvl)  # Record scores
+            st.success(f"Score recorded for {winner_name}!")  # Display confirmation
 
-            // Kick off game loop execution engine
-            gameLoop(); /* Begin rendering execution */
-        </script> <!-- End JavaScript Arcade Engine -->
-    </body> <!-- End Body Element -->
-    </html> <!-- End HTML Document -->
-    """  # End Python multi-line format string containing HTML/JS payload
+# --- TAB 3: GAME LOBBIES ---
+with tab_lobbies:  # Open Multi-Player Sessions
+    st.subheader("🌐 Active Open Racing Lobbies")  # Section subheader
+    
+    # Display table of active sessions
+    lobby_data = []  # List for session objects
+    for session_id, details in st.session_state.sessions.items():  # Iterate sessions
+        lobby_data.append({
+            "Session Name": session_id,
+            "Host Player": details["host"],
+            "Players Joined": f"{len(details['players'])} / {details['max']}",
+            "Status": details["status"]
+        })
+    
+    st.dataframe(pd.DataFrame(lobby_data), use_container_width=True)  # Display session dataframe
 
-    # Render HTML5 Canvas Game Inside Streamlit App Component Interface
-    components.html(
-        game_html, height=560
-    )  # Embed HTML5 canvas frame using Streamlit components API
+    st.divider()  # Divider bar
+    st.subheader("Create or Join a Session")  # Create or Join section
+    l_col1, l_col2 = st.columns(2)  # 2 columns
 
-    # Race completion recording interface section
-    st.subheader("🏁 Record Match Outcome")  # Subheader for manual sync
-    res_col1, res_col2, res_col3 = st.columns(
-        [2, 2, 1]
-    )  # Setup column grid for reporting
+    with l_col1:  # Create session form
+        new_lobby_name = st.text_input("New Session Name:", placeholder="e.g. Session #103")  # Input lobby name
+        if st.button("Create Open Session"):  # Button to create session
+            if new_lobby_name.strip():  # Check valid input
+                st.session_state.sessions[new_lobby_name.strip()] = {
+                    "host": st.session_state.current_user,
+                    "players": [st.session_state.current_user],
+                    "max": 2,
+                    "status": "Waiting"
+                }  # Register new lobby
+                st.success(f"Session '{new_lobby_name}' created successfully!")  # Show alert
+            else:  # Empty input prompt
+                st.warning("Please provide a session title.")  # Warning banner
 
-    with res_col1:  # Winner selection dropdown
-        winner_selected = st.selectbox(
-            "Select Race Winner", [p1_name, p2_name], key="win_select"
-        )  # Pick winner name
+    with l_col2:  # Join session selector
+        target_lobby = st.selectbox("Select Lobby to Join:", list(st.session_state.sessions.keys()))  # Select lobby
+        if st.button("Join Gaming Session"):  # Button to join session
+            lobby = st.session_state.sessions[target_lobby]  # Get session object
+            if len(lobby["players"]) < lobby["max"]:  # Check room space
+                if st.session_state.current_user not in lobby["players"]:  # Prevent duplicate entry
+                    lobby["players"].append(st.session_state.current_user)  # Add user to player list
+                    if len(lobby["players"]) == lobby["max"]:  # Set state to full
+                        lobby["status"] = "In Progress"  # Change status
+                    st.success(f"Joined {target_lobby}!")  # Show alert
+                else:  # Already joined warning
+                    st.info("You are already in this session.")  # Info prompt
+            else:  # Session full error
+                st.error("Session is already full!")  # Error banner
 
-    with res_col2:  # Finish time input field
-        time_elapsed = st.number_input(
-            "Race Finish Duration (Seconds)",
-            min_value=1.0,
-            max_value=300.0,
-            value=15.0,
-            step=0.5,
-            key="time_input",
-        )  # Capture race time
-
-    with res_col3:  # Submit score button column
-        st.write("")  # Spacing placeholder
-        st.write("")  # Spacing placeholder
-        if st.button("Submit Result", use_container_width=True):  # Click submit
-            update_scores(
-                winner_selected, time_elapsed, speed_level
-            )  # Execute points system update routine
-            st.success(
-                f"Updated statistics for {winner_selected}!"
-            )  # Show confirmation banner
-
-with tab2:  # Global Leaderboard Tab Context
-    st.subheader("🏆 Driver Standings & Ranking System")  # Leaderboard header
-
-    if st.session_state.leaderboard:  # Check if records exist in system
-        # Convert dictionary state into structured Pandas DataFrame
-        df_lb = pd.DataFrame.from_dict(
-            st.session_state.leaderboard, orient="index"
-        )  # Convert dictionary keys into rows
-        df_lb.index.name = "Driver Name"  # Name driver column index
-
-        # Sort leaderboard by Total Score descending, then by Fastest Time ascending
-        df_lb = df_lb.sort_values(
-            by=["Total Score", "Fastest Time (s)"], ascending=[False, True]
-        )  # Execute multi-column sort
-
-        # Display formatted Streamlit DataFrame
-        st.dataframe(
-            df_lb.style.highlight_max(axis=0, subset=["Total Score"], color="#2e7d32"),
-            use_container_width=True,
-        )  # Render styled data table
-    else:  # Render notice if no matches played yet
-        st.info(
-            "No races recorded yet. Complete a race in the Arena and submit scores to populate ranks!"
-        )  # Render informational prompt banner
+# --- TAB 4: LEADERBOARD ---
+with tab_ranks:  # Global Scoreboard Tab
+    st.subheader("🏆 Driver Global Rankings")  # Subheader
+    
+    if st.session_state.leaderboard:  # Check if scores exist
+        df_rank = pd.DataFrame.from_dict(st.session_state.leaderboard, orient="index")  # Build dataframe
+        df_rank.index.name = "Driver Name"  # Index column title
+        df_rank = df_rank.sort_values(by=["Total Points", "Fastest Time (s)"], ascending=[False, True])  # Sort ranks
+        st.dataframe(df_rank.style.highlight_max(axis=0, subset=["Total Points"], color="#2e7d32"), use_container_width=True)  # Highlight top score
+    else:  # Empty scores fallback
+        st.info("No recorded match results yet. Complete a race in the Arena to post scores!")  # Empty info banner
