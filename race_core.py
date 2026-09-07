@@ -320,6 +320,23 @@ class RoomManager:
                 "players": [dict(v) for v in r["players"].values()],
             }
 
+    def set_config(self, room: str, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Pin the circuit, lap count and engine class for a whole room, so
+        everyone who joins races the same event rather than their own."""
+        room = normalize_room(room)
+        now = time.time()
+        with self._lock:
+            r = self.rooms.setdefault(
+                room, {"created": now, "start_at": 0.0, "players": {}, "config": {},
+                       "results": []})
+            r["config"] = dict(config or {})
+            return dict(r["config"])
+
+    def get_config(self, room: str) -> Dict[str, Any]:
+        with self._lock:
+            r = self.rooms.get(normalize_room(room))
+            return dict(r["config"]) if r else {}
+
     def leave(self, room: str, pid: str) -> None:
         with self._lock:
             r = self.rooms.get(normalize_room(room))
@@ -355,18 +372,52 @@ def _rand_id() -> str:
 
 
 # --------------------------------------------------------------------------
-# HTTP API (talks to the game canvas)
+# Request handling (shared by the standalone server and the Streamlit mount)
+# --------------------------------------------------------------------------
+def handle_request(board: "Leaderboard", rooms: "RoomManager", method: str,
+                   path: str, query: Dict[str, str],
+                   data: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    """One place that answers every API call, whichever server received it."""
+    path = "/" + path.strip("/").split("/")[-1] if path else "/"
+    try:
+        if method == "GET":
+            if path == "/ping":
+                return 200, {"ok": True, "t": time.time()}
+            if path == "/state":
+                return 200, rooms.state(query.get("room", "LOBBY"))
+            if path == "/leaderboard":
+                return 200, {"standings": board.standings(int(query.get("limit", 50)))}
+            return 404, {"error": "not_found"}
+
+        if path == "/join":
+            return 200, rooms.join(data.get("room", "LOBBY"), str(data.get("name", "Driver")),
+                                   data.get("pid"), data.get("config"))
+        if path == "/pos":
+            return 200, rooms.update(data.get("room", "LOBBY"), str(data.get("pid", "")), data)
+        if path == "/leave":
+            rooms.leave(data.get("room", "LOBBY"), str(data.get("pid", "")))
+            return 200, {"ok": True}
+        if path == "/hello":
+            return 200, {"ok": True, "driver": board.touch_driver(
+                str(data.get("name", "")), str(data.get("room", "")))}
+        if path == "/result":
+            return 200, {"ok": True, "driver": board.record_result(data)}
+        return 404, {"error": "not_found"}
+    except Exception as exc:                      # never drop the game's connection
+        return 500, {"error": str(exc)}
+
+
+# --------------------------------------------------------------------------
+# Standalone HTTP API (fallback when the Streamlit mount is unavailable)
 # --------------------------------------------------------------------------
 class _Handler(BaseHTTPRequestHandler):
-    server_version = "TurboRacing/2.0"
-    board: Leaderboard
-    rooms: RoomManager
+    server_version = "TurboRacing/3.0"
+    board: "Leaderboard"
+    rooms: "RoomManager"
 
-    # keep Streamlit's console readable
-    def log_message(self, fmt, *args):  # noqa: A003
+    def log_message(self, fmt, *args):            # keep Streamlit's console readable
         pass
 
-    # -- plumbing ----------------------------------------------------------
     def _send(self, payload: Any, status: int = 200) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
@@ -384,8 +435,7 @@ class _Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
             if length <= 0:
                 return {}
-            raw = self.rfile.read(min(length, 64_000))
-            data = json.loads(raw.decode("utf-8"))
+            data = json.loads(self.rfile.read(min(length, 64_000)).decode("utf-8"))
             return data if isinstance(data, dict) else {}
         except Exception:
             return {}
@@ -396,39 +446,13 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
-        try:
-            if u.path == "/api/ping":
-                return self._send({"ok": True, "t": time.time()})
-            if u.path == "/api/state":
-                return self._send(self.rooms.state(q.get("room", "LOBBY")))
-            if u.path == "/api/leaderboard":
-                return self._send({"standings": self.board.standings(int(q.get("limit", 50)))})
-            return self._send({"error": "not_found"}, 404)
-        except Exception as exc:  # never let the game lose its connection
-            return self._send({"error": str(exc)}, 500)
+        status, payload = handle_request(self.board, self.rooms, "GET", u.path, q, {})
+        self._send(payload, status)
 
     def do_POST(self):  # noqa: N802
         u = urlparse(self.path)
-        data = self._body()
-        try:
-            if u.path == "/api/join":
-                return self._send(self.rooms.join(
-                    data.get("room", "LOBBY"), str(data.get("name", "Driver")),
-                    data.get("pid"), data.get("config")))
-            if u.path == "/api/pos":
-                return self._send(self.rooms.update(
-                    data.get("room", "LOBBY"), str(data.get("pid", "")), data))
-            if u.path == "/api/leave":
-                self.rooms.leave(data.get("room", "LOBBY"), str(data.get("pid", "")))
-                return self._send({"ok": True})
-            if u.path == "/api/hello":
-                return self._send({"ok": True, "driver": self.board.touch_driver(
-                    str(data.get("name", "")), str(data.get("room", "")))})
-            if u.path == "/api/result":
-                return self._send({"ok": True, "driver": self.board.record_result(data)})
-            return self._send({"error": "not_found"}, 404)
-        except Exception as exc:
-            return self._send({"error": str(exc)}, 500)
+        status, payload = handle_request(self.board, self.rooms, "POST", u.path, {}, self._body())
+        self._send(payload, status)
 
 
 class GameServer:
@@ -454,8 +478,79 @@ class GameServer:
 def start_server(port: int = 0) -> Tuple[GameServer, Leaderboard, RoomManager]:
     board = Leaderboard()
     rooms = RoomManager()
-    server = GameServer(board, rooms, port=port)
-    return server, board, rooms
+    return GameServer(board, rooms, port=port), board, rooms
+
+
+# --------------------------------------------------------------------------
+# Mounting the API inside Streamlit's own web server
+# --------------------------------------------------------------------------
+# Sharing Streamlit's port matters a lot in practice: players on phones then
+# need exactly one open port (8501), the API is same-origin so HTTPS
+# deployments don't trip mixed-content blocking, and one firewall rule covers
+# everything.  If the internals ever move, we fall back to the extra port.
+API_PREFIX = "/racing/api"
+
+
+def attach_to_streamlit(board: Leaderboard, rooms: RoomManager,
+                        prefix: str = API_PREFIX) -> bool:
+    """Add the racing API to the Tornado app Streamlit is already running."""
+    try:
+        import gc
+
+        import tornado.web
+    except Exception:
+        return False
+
+    apps = [o for o in gc.get_objects() if isinstance(o, tornado.web.Application)]
+    if not apps:
+        return False
+
+    class RacingHandler(tornado.web.RequestHandler):  # type: ignore[misc]
+        def initialize(self, board, rooms):           # noqa: A002
+            self.board, self.rooms = board, rooms
+
+        def set_default_headers(self):
+            self.set_header("Content-Type", "application/json")
+            self.set_header("Access-Control-Allow-Origin", "*")
+            self.set_header("Access-Control-Allow-Headers", "Content-Type")
+            self.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.set_header("Cache-Control", "no-store")
+
+        def check_xsrf_cookie(self):                  # game client, not a form post
+            return
+
+        def options(self, *a):
+            self.finish(json.dumps({"ok": True}))
+
+        def _run(self, method, endpoint):
+            query = {k: v[0].decode() for k, v in self.request.query_arguments.items()}
+            data = {}
+            if method == "POST" and self.request.body:
+                try:
+                    parsed = json.loads(self.request.body.decode("utf-8"))
+                    data = parsed if isinstance(parsed, dict) else {}
+                except Exception:
+                    data = {}
+            status, payload = handle_request(self.board, self.rooms, method,
+                                             endpoint, query, data)
+            self.set_status(status)
+            self.finish(json.dumps(payload))
+
+        def get(self, endpoint):
+            self._run("GET", endpoint)
+
+        def post(self, endpoint):
+            self._run("POST", endpoint)
+
+    spec = (prefix.rstrip("/") + r"/(\w+)", RacingHandler, {"board": board, "rooms": rooms})
+    ok = False
+    for app in apps:
+        try:
+            app.add_handlers(r".*$", [spec])
+            ok = True
+        except Exception:
+            continue
+    return ok
 
 
 # --------------------------------------------------------------------------
@@ -477,6 +572,47 @@ def lan_ip() -> str:
     finally:
         if s:
             s.close()
+
+
+def lan_ip_candidates() -> List[str]:
+    """Every plausible address other devices could use to reach this machine.
+
+    Picking the wrong one is the usual reason a QR code "does not work": the
+    default route can point at a VPN or a virtual adapter the phone can't see.
+    """
+    found: List[str] = []
+
+    def add(ip: str) -> None:
+        if (ip and ip not in found and not ip.startswith("127.")
+                and not ip.startswith("169.254.")):
+            found.append(ip)
+
+    add(lan_ip())
+    try:
+        host = socket.gethostname()
+        for info in socket.getaddrinfo(host, None, socket.AF_INET):
+            add(info[4][0])
+    except Exception:
+        pass
+    try:  # Linux/macOS: read the interface list directly
+        import subprocess
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=2)
+        for ip in out.stdout.split():
+            add(ip)
+    except Exception:
+        pass
+    # Home/office networks first — those are the ones a phone shares.
+    found.sort(key=lambda ip: 0 if ip.startswith(("192.168.", "10.", "172.")) else 1)
+    return found or ["127.0.0.1"]
+
+
+def port_reachable(host: str, port: int, timeout: float = 1.2) -> bool:
+    """Can something actually connect to host:port from outside localhost?"""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except Exception:
+        return False
 
 
 def qr_png_bytes(text: str, scale: int = 8) -> Optional[bytes]:

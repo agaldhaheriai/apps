@@ -35,7 +35,12 @@ DEFAULT_CFG: Dict[str, Any] = {
     "camera": "chase",
     "height": 620,
     "api": None,          # e.g. "http://192.168.1.20:8765"
-    "apiPort": None,      # resolved against the browser host at runtime
+    "apiPort": None,      # fallback port, resolved against the browser host
+    "apiPrefix": None,    # same-origin mount, e.g. "/racing/api" (preferred)
+    "color1": 0xef4444,   # player 1 paint
+    "color2": 0x3b82f6,   # player 2 paint
+    "musicVolume": 0.35,
+    "musicUrl": None,     # optional own soundtrack (data: or http URL)
     "room": None,         # multiplayer room code (None = solo)
     "pid": None,
     "hotseat": False,     # second local player on WASD
@@ -86,6 +91,12 @@ canvas#scene{display:block;width:100%;height:100%}
   background:linear-gradient(90deg,#a855f7,#22d3ee);transition:width .12s linear}
 #minimap{bottom:14px;right:14px;padding:8px;z-index:6}
 #minimap canvas{display:block;border-radius:6px}
+#netchip{position:absolute;top:12px;left:50%;transform:translate(-50%,44px);z-index:6;
+  font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 12px;border-radius:20px;background:rgba(9,14,28,.85);
+  border:1px solid var(--line);color:#8fa6cf;display:none}
+#netchip b{color:#7dd3fc}
+#netchip.off{color:#fca5a5;border-color:rgba(248,113,113,.5)}
 #toast{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
   font-size:56px;font-weight:900;letter-spacing:2px;text-shadow:0 6px 26px rgba(0,0,0,.8);
   z-index:8;pointer-events:none;opacity:0;transition:opacity .2s}
@@ -127,23 +138,62 @@ table.res tr.me td{background:rgba(56,189,248,.14);color:#fff;font-weight:700}
   background:rgba(56,189,248,.2);color:#7dd3fc;margin:2px}
 #lobby{margin:10px 0;font-size:13px;color:#a9bcdd}
 #loaderr{color:#fca5a5;font-size:13px;margin-top:10px}
-@media (max-width:640px){
-  #standings,#minimap{display:none}
-  #hud{padding:7px 10px;min-width:150px}
-  #speedo{width:150px}
-  .card h1{font-size:22px}
+/* ---- touch controls ---- */
+#touchpad{position:absolute;inset:auto 0 0 0;z-index:9;display:flex;
+  justify-content:space-between;align-items:flex-end;padding:0 12px 12px;
+  padding-bottom:calc(12px + env(safe-area-inset-bottom));pointer-events:none}
+.tside{display:flex;gap:10px;align-items:flex-end;pointer-events:none}
+.tbtn{pointer-events:auto;-webkit-tap-highlight-color:transparent;touch-action:none;
+  user-select:none;border:1px solid rgba(140,180,255,.45);border-radius:18px;
+  background:rgba(9,14,28,.62);color:#e8eefc;font-family:'Barlow Condensed',sans-serif;
+  font-weight:800;letter-spacing:.06em;backdrop-filter:blur(6px);
+  box-shadow:0 6px 18px rgba(0,0,0,.4)}
+.tbtn.on{background:rgba(56,189,248,.5);border-color:#7dd3fc;color:#04121f}
+.tbtn.steer{width:74px;height:74px;font-size:26px;border-radius:50%}
+.tbtn.gas{width:96px;height:96px;font-size:19px;border-radius:50%;
+  background:rgba(34,197,94,.32);border-color:rgba(134,239,172,.6)}
+.tbtn.gas.on{background:rgba(52,211,153,.62)}
+.tbtn.small{width:70px;height:52px;font-size:12px}
+.tbtn.nitro{background:rgba(168,85,247,.3);border-color:rgba(216,180,254,.6)}
+#rotate{position:absolute;inset:0;z-index:30;display:none;align-items:center;
+  justify-content:center;flex-direction:column;gap:10px;text-align:center;
+  background:rgba(5,7,15,.94);font-size:15px;font-weight:700;padding:24px}
+#rotate span{font-size:44px}
+
+@media (max-width:820px){
+  #standings{display:none}
+  #hud{padding:6px 9px;min-width:132px}
+  #hud .row{font-size:10px}
+  #hud .big{font-size:19px}
+  #speedo{width:112px;padding:7px 10px;bottom:auto;top:12px;right:12px;left:auto}
+  #speedo .val{font-size:22px}
+  #minimap{bottom:auto;top:96px;right:12px;padding:5px}
+  #minimap canvas{width:88px;height:88px}
+  #tools{transform:translateX(-50%) scale(.86);transform-origin:top center}
+  #netchip{transform:translate(-50%,40px) scale(.9)}
+  #toast{font-size:38px}
+  .card{padding:18px 16px}
+  .card h1{font-size:20px}
+  .keys{grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:6px}
 }
+body.touch #speedo{bottom:auto}
+body.touch .keys{display:none}
 """
 
 GAME_JS = r"""
 (function () {
   'use strict';
   var CFG = window.__RACE_CFG__ || {};
-  // When the app only knows its port (LAN play), resolve the host at runtime so
-  // phones joining through the QR code talk to the right machine.
-  if (!CFG.api && CFG.apiPort) {
-    CFG.api = window.location.protocol + '//' + window.location.hostname + ':' + CFG.apiPort;
+  // Where the race server lives. Same-origin first: it needs no extra open
+  // port and survives HTTPS, which is what breaks QR-code joins on phones.
+  var API_BASES = [];
+  if (CFG.apiPrefix) API_BASES.push(window.location.origin + CFG.apiPrefix);
+  if (CFG.apiPort) {
+    API_BASES.push(window.location.protocol + '//' + window.location.hostname +
+      ':' + CFG.apiPort + '/api');
   }
+  if (CFG.api) API_BASES.push(String(CFG.api).replace(/\/$/, '') + '/api');
+  var API_BASE = API_BASES[0] || null;
   var $ = function (id) { return document.getElementById(id); };
   var clamp = function (v, a, b) { return v < a ? a : (v > b ? b : v); };
   var lerp = function (a, b, t) { return a + (b - a) * t; };
@@ -276,6 +326,14 @@ GAME_JS = r"""
     this.rivalGain.gain.setTargetAtTime(clamp(0.05 - o.rivalDist / 900, 0, 0.05), t, 0.2);
     if (this.rivalOsc) this.rivalOsc.frequency.setTargetAtTime(90 + rpm * 60, t, 0.2);
     this.crowdGain.gain.setTargetAtTime(o.crowd, t, 0.5);
+    if (this.musicGain) {
+      // Engine and crashes take priority; the track sits underneath them.
+      this.musicDuck = Math.min(1, this.musicDuck + (o.dt || 0.016) * 0.8);
+      var target = this.musicOn
+        ? this.musicVol * (1 - 0.45 * Math.min(1, o.speedRatio)) * this.musicDuck
+        : 0;
+      this.musicGain.gain.setTargetAtTime(target, t, 0.25);
+    }
   };
   AudioKit.prototype._burst = function (dur, freq, q, gain, type) {
     if (!this.ok) return;
@@ -299,7 +357,24 @@ GAME_JS = r"""
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.05);
   };
+  AudioKit.prototype.overtake = function () {
+    if (!this.ok) return;
+    var ctx = this.ctx, t = ctx.currentTime;
+    var src = ctx.createBufferSource(); src.buffer = this.noise;
+    var f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 2.5;
+    f.frequency.setValueAtTime(3000, t);
+    f.frequency.exponentialRampToValueAtTime(300, t + 0.45);   // car sweeping past
+    var g = ctx.createGain();
+    g.gain.setValueAtTime(0.2, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    src.connect(f); f.connect(g); g.connect(this.master);
+    src.start(t); src.stop(t + 0.55);
+    this._tone(784, 0.02, 0.18, 0.12, 'triangle');
+    this.cheer(0.34, 1.6);
+    this.duckMusic(0.55);
+  };
   AudioKit.prototype.crash = function (hard) {
+    this.duckMusic(hard ? 0.25 : 0.6);
     this._burst(hard ? 0.6 : 0.28, hard ? 260 : 500, 0.8, hard ? 0.5 : 0.22, 'lowpass');
     this._tone(hard ? 70 : 120, 0, 0.28, hard ? 0.35 : 0.15, 'square');
     this.cheer(hard ? 0.6 : 0.25, 1.2);
@@ -333,6 +408,105 @@ GAME_JS = r"""
   };
   AudioKit.prototype.blip = function () { this._tone(880, 0, 0.09, 0.12, 'sine'); };
 
+  /* --- Soundtrack ---------------------------------------------------
+     An original drift-style loop written with oscillators: four-on-the-floor
+     kick, off-beat hats, a driving bass line and a minor-pentatonic arp.
+     It ducks under the engine as you accelerate and dips on impacts, and you
+     can swap in your own track from the sidebar instead. ----------------- */
+  AudioKit.prototype.initMusic = function (volume, url) {
+    if (!this.ok || this.musicReady) return;
+    var ctx = this.ctx;
+    this.musicVol = volume == null ? 0.35 : volume;
+    this.musicGain = ctx.createGain();
+    this.musicGain.gain.value = 0;
+    this.musicGain.connect(this.master);
+    this.musicDuck = 1;
+    this.musicOn = this.musicVol > 0;
+    this.bpm = 126;
+
+    if (url) {                                   // the player's own track
+      try {
+        var el = new Audio();
+        el.crossOrigin = 'anonymous';
+        el.loop = true;
+        el.src = url;
+        var src = ctx.createMediaElementSource(el);
+        src.connect(this.musicGain);
+        el.play().catch(function () {});
+        this.musicEl = el;
+        this.musicReady = true;
+        return;
+      } catch (e) { /* fall through to the synth loop */ }
+    }
+
+    this.musicStep = 0;
+    this.musicNext = ctx.currentTime + 0.1;
+    var self = this;
+    this.musicTimer = setInterval(function () { self._musicTick(); }, 25);
+    this.musicReady = true;
+  };
+  AudioKit.prototype._musicTick = function () {
+    if (!this.ok || !this.musicOn) return;
+    var step = 60 / this.bpm / 4;
+    while (this.musicNext < this.ctx.currentTime + 0.18) {
+      this._musicStep(this.musicStep, this.musicNext);
+      this.musicNext += step;
+      this.musicStep = (this.musicStep + 1) % 32;
+    }
+  };
+  AudioKit.prototype._musicStep = function (i, t) {
+    var ctx = this.ctx, out = this.musicGain;
+    var BASS = [55, 55, 0, 55, 0, 55, 82.41, 0, 65.41, 0, 65.41, 0, 49, 0, 49, 0,
+                55, 55, 0, 55, 0, 55, 82.41, 0, 73.42, 0, 73.42, 0, 87.31, 0, 82.41, 0];
+    var ARP = [440, 523.25, 659.25, 523.25, 440, 392, 329.63, 392];
+
+    if (i % 4 === 0) {                                   // kick
+      var k = ctx.createOscillator(), kg = ctx.createGain();
+      k.type = 'sine';
+      k.frequency.setValueAtTime(130, t);
+      k.frequency.exponentialRampToValueAtTime(45, t + 0.11);
+      kg.gain.setValueAtTime(0.5, t);
+      kg.gain.exponentialRampToValueAtTime(0.001, t + 0.19);
+      k.connect(kg); kg.connect(out); k.start(t); k.stop(t + 0.22);
+    }
+    if (i % 4 === 2) {                                   // off-beat hat
+      var h = ctx.createBufferSource(); h.buffer = this.noise;
+      var hf = ctx.createBiquadFilter(); hf.type = 'highpass'; hf.frequency.value = 7000;
+      var hg = ctx.createGain();
+      hg.gain.setValueAtTime(0.12, t);
+      hg.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+      h.connect(hf); hf.connect(hg); hg.connect(out); h.start(t); h.stop(t + 0.07);
+    }
+    if (BASS[i]) {                                       // bass line
+      var b = ctx.createOscillator(), bf = ctx.createBiquadFilter(), bg = ctx.createGain();
+      b.type = 'sawtooth'; b.frequency.value = BASS[i];
+      bf.type = 'lowpass'; bf.frequency.value = 420; bf.Q.value = 6;
+      bg.gain.setValueAtTime(0.0001, t);
+      bg.gain.exponentialRampToValueAtTime(0.24, t + 0.015);
+      bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.19);
+      b.connect(bf); bf.connect(bg); bg.connect(out); b.start(t); b.stop(t + 0.22);
+    }
+    if (i % 2 === 0) {                                   // arp on the eighths
+      var a = ctx.createOscillator(), ag = ctx.createGain();
+      a.type = 'square';
+      a.frequency.value = ARP[(i / 2) % ARP.length] * (i > 15 ? 1.5 : 1);
+      ag.gain.setValueAtTime(0.0001, t);
+      ag.gain.exponentialRampToValueAtTime(0.055, t + 0.01);
+      ag.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+      a.connect(ag); ag.connect(out); a.start(t); a.stop(t + 0.18);
+    }
+  };
+  AudioKit.prototype.toggleMusic = function () {
+    this.musicOn = !this.musicOn;
+    if (this.musicEl) { this.musicOn ? this.musicEl.play() : this.musicEl.pause(); }
+    if (this.musicOn && !this.musicEl) { this.musicNext = this.ctx.currentTime + 0.05; }
+    return this.musicOn;
+  };
+  AudioKit.prototype.setMusicVolume = function (v) { this.musicVol = v; };
+  AudioKit.prototype.duckMusic = function (amount) {
+    this.musicDuck = Math.min(this.musicDuck, amount);
+  };
+
   var AUDIO = new AudioKit(CFG.volume);
 
   /* ===================================================================
@@ -344,7 +518,11 @@ GAME_JS = r"""
   scene.background = new THREE.Color(0x9ed2f5);
   scene.fog = new THREE.Fog(0x9ed2f5, 220, 420);
 
-  var HQ = CFG.quality !== 'low';
+  var IS_TOUCH = ('ontouchstart' in window) ||
+    (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  var SMALL = Math.min(window.innerWidth, window.innerHeight) < 820;
+  // Phones get the lighter renderer automatically so the frame rate holds up.
+  var HQ = CFG.quality !== 'low' && !(IS_TOUCH && SMALL);
   var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: HQ });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, HQ ? 2 : 1));
   if (HQ) {
@@ -712,7 +890,7 @@ GAME_JS = r"""
     var plate = new THREE.Sprite(new THREE.SpriteMaterial({
       map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
     plate.scale.set(6, 1.5, 1);
-    plate.position.y = 3.4;
+    plate.position.y = 3.6;
     g.add(plate);
 
     g.userData = { wheels: wheels, flame: flame, plate: plate, helmet: helmet };
@@ -751,20 +929,34 @@ GAME_JS = r"""
 
   var MAX_SPEED = 26 + CFG.power * 3.6;     // world units / second
   var racers = [];
-  var me = makeRacer({ id: 'me', name: CFG.player, kind: 'human', color: PALETTE[0], slot: 0 });
+  function addOwnMarker(r) {
+    var ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.1, 2.6, 28),
+      new THREE.MeshBasicMaterial({ color: r.color, transparent: true, opacity: 0.55,
+        side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.12;
+    r.mesh.add(ring);
+  }
+
+  var me = makeRacer({ id: 'me', name: CFG.player, kind: 'human',
+    color: CFG.color1 != null ? CFG.color1 : PALETTE[0], slot: 0 });
   racers.push(me);
+  addOwnMarker(me);
 
   var hotseat = null;
   if (CFG.hotseat) {
     hotseat = makeRacer({ id: 'p2', name: CFG.player2 || 'Player 2', kind: 'human2',
-      color: PALETTE[1], slot: 1 });
+      color: CFG.color2 != null ? CFG.color2 : PALETTE[1], slot: 1 });
     racers.push(hotseat);
   }
   var aiStart = racers.length;
+  var taken = racers.map(function (r) { return r.color; });
+  var aiPalette = PALETTE.filter(function (c) { return taken.indexOf(c) < 0; });
   for (var ai = 0; ai < (CFG.aiCount || 0); ai++) {
     racers.push(makeRacer({
       id: 'ai' + ai, name: AI_NAMES[ai % AI_NAMES.length], kind: 'ai',
-      color: PALETTE[(aiStart + ai) % PALETTE.length], slot: aiStart + ai
+      color: aiPalette[ai % aiPalette.length], slot: aiStart + ai
     }));
   }
   var remotes = {};   // pid -> racer (multiplayer ghosts)
@@ -781,34 +973,61 @@ GAME_JS = r"""
     if (k === 'c') cycleCamera();
     if (k === 'm') showMsg(AUDIO.toggleMute() ? '🔇 Sound off' : '🔊 Sound on');
     if (k === 'f') toggleFullscreen();
+    if (k === 'b') showMsg(AUDIO.toggleMusic() ? '🎵 Music on' : '🎵 Music off');
     if (k === 'r' && state.phase === 'racing') respawn(me);
     if (k === 'enter' && state.phase === 'ready') beginCountdown();
   });
   window.addEventListener('keyup', function (e) { keys[e.key] = false; });
   window.addEventListener('blur', function () { keys = {}; });
 
-  // touch controls for phones joining via the QR code
+  // Touch controls for phones joining via the QR code: steering under the left
+  // thumb, throttle and nitro under the right, sized for real thumbs.
   var touch = { l: false, r: false, up: false, down: false, boost: false };
   function bindTouch() {
-    if (!('ontouchstart' in window)) return;
-    var bar = document.createElement('div');
-    bar.id = 'touchpad';
-    bar.style.cssText = 'position:absolute;inset:auto 0 0 0;height:120px;z-index:9;' +
-      'display:flex;gap:8px;padding:10px;pointer-events:none';
-    var defs = [['◀', 'l'], ['▶', 'r'], ['NITRO', 'boost'], ['BRAKE', 'down'], ['GAS', 'up']];
-    defs.forEach(function (d) {
-      var b = document.createElement('div');
-      b.textContent = d[0];
-      b.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;' +
-        'background:rgba(9,14,28,.75);border:1px solid rgba(120,160,255,.3);border-radius:14px;' +
-        'font-weight:800;font-size:16px;color:#e8eefc;pointer-events:auto;user-select:none';
-      var on = function (e) { e.preventDefault(); touch[d[1]] = true; b.style.background = 'rgba(56,189,248,.4)'; };
-      var off = function (e) { e.preventDefault(); touch[d[1]] = false; b.style.background = 'rgba(9,14,28,.75)'; };
-      b.addEventListener('touchstart', on); b.addEventListener('touchend', off);
-      b.addEventListener('touchcancel', off);
-      bar.appendChild(b);
+    if (!IS_TOUCH) return;
+    document.body.classList.add('touch');
+    var pad = document.createElement('div');
+    pad.id = 'touchpad';
+    pad.innerHTML =
+      '<div class="tside left">' +
+      '  <button class="tbtn steer" data-k="l">◀</button>' +
+      '  <button class="tbtn steer" data-k="r">▶</button>' +
+      '</div>' +
+      '<div class="tside right">' +
+      '  <button class="tbtn small" data-k="down">BRAKE</button>' +
+      '  <button class="tbtn small nitro" data-k="boost">NITRO</button>' +
+      '  <button class="tbtn gas" data-k="up">GAS</button>' +
+      '</div>';
+    wrap.appendChild(pad);
+
+    Array.prototype.forEach.call(pad.querySelectorAll('.tbtn'), function (b) {
+      var k = b.getAttribute('data-k');
+      var on = function (e) {
+        e.preventDefault();
+        touch[k] = true;
+        b.classList.add('on');
+        if (navigator.vibrate) navigator.vibrate(8);
+      };
+      var off = function (e) { e.preventDefault(); touch[k] = false; b.classList.remove('on'); };
+      b.addEventListener('touchstart', on, { passive: false });
+      b.addEventListener('touchend', off, { passive: false });
+      b.addEventListener('touchcancel', off, { passive: false });
+      b.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     });
-    wrap.appendChild(bar);
+
+    // Stop the page itself from scrolling or zooming while racing.
+    document.addEventListener('touchmove', function (e) {
+      if (e.target.closest && e.target.closest('#touchpad')) e.preventDefault();
+    }, { passive: false });
+
+    // Nudge the player into landscape, where the track actually fits.
+    function orient() {
+      var portrait = window.innerHeight > window.innerWidth;
+      $('rotate').style.display = portrait ? 'flex' : 'none';
+    }
+    window.addEventListener('resize', orient);
+    window.addEventListener('orientationchange', function () { setTimeout(orient, 250); });
+    orient();
   }
   bindTouch();
 
@@ -1100,9 +1319,21 @@ GAME_JS = r"""
     });
   }
 
-  function drawHUD() {
+  function drawHUD(dt) {
     var order = standings();
     var pos = order.indexOf(me) + 1;
+
+    // Gaining a place mid-race gets its own sound and a call-out.
+    if (state.phase === 'racing' && !me.finished) {
+      if (state.overtakeCd > 0) state.overtakeCd -= (dt || 0);
+      if (state.lastRank && pos < state.lastRank && state.overtakeCd <= 0) {
+        var passed = order[pos] ? order[pos].name : '';
+        AUDIO.overtake();
+        showMsg('OVERTAKE — P' + pos + (passed ? ' · past ' + esc(passed) : ''));
+        state.overtakeCd = 1.2;
+      }
+      state.lastRank = pos;
+    }
     $('h-time').textContent = fmt(state.phase === 'racing' || state.phase === 'done'
       ? state.time : 0);
     $('h-lap').textContent = Math.min(me.lap + 1, CFG.laps) + ' / ' + CFG.laps;
@@ -1131,13 +1362,29 @@ GAME_JS = r"""
   /* ===================================================================
      10. MULTIPLAYER
      =================================================================== */
+  function probeApi() {
+    // Try each candidate in turn; whichever answers /ping becomes the server.
+    return API_BASES.reduce(function (chain, base) {
+      return chain.then(function (found) {
+        if (found) return found;
+        return fetch(base + '/ping', { method: 'GET' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (j) { return (j && j.ok) ? base : null; })
+          .catch(function () { return null; });
+      });
+    }, Promise.resolve(null)).then(function (found) {
+      if (found) API_BASE = found;
+      return found;
+    });
+  }
+
   var NET = {
-    on: !!(CFG.api && CFG.room),
+    on: !!(API_BASES.length && CFG.room),
     pid: CFG.pid || null,
     lastSend: 0, lastOk: 0, startAt: 0, failed: 0, joined: false
   };
   function api(path, body) {
-    var url = CFG.api + path;
+    var url = API_BASE + path;
     var opt = body
       ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       : { method: 'GET' };
@@ -1145,26 +1392,26 @@ GAME_JS = r"""
   }
   function netJoin() {
     if (!NET.on) return;
-    api('/api/join', { room: CFG.room, name: CFG.player, pid: NET.pid })
+    api('/join', { room: CFG.room, name: CFG.player, pid: NET.pid })
       .then(function (r) {
         if (r && r.pid) {
           NET.pid = r.pid; NET.joined = true; NET.failed = 0;
-          if (r.player && typeof r.player.slot === 'number') {
-            me.color = PALETTE[r.player.slot % PALETTE.length];
-          }
           $('lobby').textContent = 'Connected to room ' + CFG.room + ' as ' + CFG.player;
+          netStatus();
         }
       })
       .catch(function () {
         NET.failed++;
+        NET.joined = false;
         $('lobby').textContent = 'Could not reach the race server — racing offline.';
+        netStatus();
       });
   }
   function netTick(now) {
     if (!NET.on || !NET.joined) return;
     if (now - NET.lastSend < 0.08) return;
     NET.lastSend = now;
-    api('/api/pos', {
+    api('/pos', {
       room: CFG.room, pid: NET.pid, x: me.x, z: me.z, angle: me.angle,
       speed: me.speed, lap: me.lap, progress: me.progress,
       finished: me.finished, time: state.time,
@@ -1176,11 +1423,27 @@ GAME_JS = r"""
       NET.startAt = r.start_at || 0;
       NET.serverNow = r.now;
       syncRemotes(r.players || []);
+      netStatus((r.players || []).length);
       if (state.phase === 'ready' && NET.startAt && r.now < NET.startAt) {
         beginCountdown(Math.max(0.5, NET.startAt - r.now));
       }
     }).catch(function () { NET.failed++; });
   }
+  function netStatus(count) {
+    var chip = $('netchip');
+    if (!CFG.room) { chip.style.display = 'none'; return; }
+    chip.style.display = 'block';
+    if (!NET.on || !NET.joined) {
+      chip.className = 'off';
+      chip.innerHTML = 'Room ' + esc(CFG.room) + ' · offline';
+      return;
+    }
+    chip.className = '';
+    var n = count == null ? Object.keys(remotes).length + 1 : count;
+    chip.innerHTML = 'Room <b>' + esc(CFG.room) + '</b> · ' + n +
+      (n === 1 ? ' driver connected' : ' drivers connected');
+  }
+
   function syncRemotes(list) {
     var seen = {};
     list.forEach(function (p) {
@@ -1241,8 +1504,8 @@ GAME_JS = r"""
       localStorage.setItem(key, JSON.stringify(lb));
       localStorage.setItem('turbo_last_driver', r.name);
     } catch (e) { /* storage disabled — no problem */ }
-    if (CFG.api) {
-      api('/api/result', payload).then(function () {
+    if (API_BASE) {
+      api('/result', payload).then(function () {
         $('save-note').textContent = '✅ Saved to the league leaderboard.';
       }).catch(function () {
         $('save-note').textContent = '⚠️ Offline — result stored in this browser only.';
@@ -1258,12 +1521,14 @@ GAME_JS = r"""
   var state = {
     phase: 'ready',      // ready | countdown | racing | done
     time: 0, raceStart: 0, countdown: 0, lastBeep: -1, autopilot: false,
+    lastRank: 0, overtakeCd: 0,
     pendingStartBroadcast: false
   };
 
   function beginCountdown(seconds) {
     if (state.phase !== 'ready') return;
     AUDIO.start();
+    AUDIO.initMusic(CFG.musicVolume, CFG.musicUrl);
     AUDIO.baseCrowd = 0.055;
     AUDIO.cheer(0.3, 3);
     $('screen-start').style.display = 'none';
@@ -1323,9 +1588,10 @@ GAME_JS = r"""
     });
     state.phase = 'ready';
     state.time = 0;
+    state.lastRank = 0;
     lightBulbs.forEach(function (b) { b.material.color.set(0x3a0d0d); });
     $('screen-start').style.display = 'flex';
-    if (NET.on) api('/api/pos', { room: CFG.room, pid: NET.pid, reset_start: true }).catch(function () {});
+    if (NET.on) api('/pos', { room: CFG.room, pid: NET.pid, reset_start: true }).catch(function () {});
   }
 
   /* ===================================================================
@@ -1392,7 +1658,13 @@ GAME_JS = r"""
     var f = r.mesh.userData.flame;
     f.visible = !!r.boosting;
     if (f.visible) f.scale.set(1, 0.7 + Math.random() * 0.7, 1);
-    r.mesh.userData.plate.visible = (r !== me) || camMode === 'top';
+    // Every driver's name floats over their car, sized so it stays legible
+    // whether the camera is right behind it or looking down from above.
+    var plate = r.mesh.userData.plate;
+    plate.visible = true;
+    var camDist = Math.hypot(camera.position.x - r.x, camera.position.z - r.z);
+    var ps = clamp(camDist / 26, 0.75, 2.6);
+    plate.scale.set(6 * ps, 1.5 * ps, 1);
   }
 
   var last = performance.now();
@@ -1463,7 +1735,7 @@ GAME_JS = r"""
       screech: state.phase === 'racing' &&
         ((me.offTrack && Math.abs(me.speed) > 6) ||
          (Math.abs(me.steer || 0) > 0.5 && Math.abs(me.speed) > MAX_SPEED * 0.62)),
-      rivalDist: rivalDist,
+      rivalDist: rivalDist, dt: dt,
       crowd: (AUDIO.baseCrowd || 0.05) + (state.phase === 'racing' ? sr * 0.02 : 0)
     });
 
@@ -1476,7 +1748,7 @@ GAME_JS = r"""
     });
 
     updateCamera(dt);
-    drawHUD();
+    drawHUD(dt);
     drawMini();
     netTick(state.clock);
 
@@ -1498,21 +1770,45 @@ GAME_JS = r"""
     AUDIO.start();
     this.textContent = AUDIO.toggleMute() ? '🔇 Sound' : '🔊 Sound';
   });
+  $('btn-music').addEventListener('click', function () {
+    AUDIO.start();
+    AUDIO.initMusic(CFG.musicVolume, CFG.musicUrl);
+    this.textContent = AUDIO.toggleMusic() ? '🎵 Music' : '🎵 Music off';
+  });
   $('btn-help').addEventListener('click', function () {
     $('screen-start').style.display =
       $('screen-start').style.display === 'flex' ? 'none' : 'flex';
   });
 
+  if (IS_TOUCH) {
+    var kb = document.querySelector('.keys');
+    if (kb) {
+      kb.style.display = 'grid';
+      kb.innerHTML = '<div><b>Steer</b> ◀ ▶ buttons, bottom left</div>' +
+        '<div><b>Throttle</b> GAS, bottom right</div>' +
+        '<div><b>Nitro</b> NITRO button</div>' +
+        '<div><b>Fullscreen</b> the ⛶ button</div>';
+    }
+  }
   $('start-track').textContent = LAY.name;
   $('start-laps').textContent = CFG.laps;
   $('start-field').textContent = racers.length + (NET.on ? '+' : '');
   if (NET.on) {
     $('lobby').textContent = 'Joining room ' + CFG.room + '…';
-    netJoin();
-    setInterval(function () { if (!NET.joined) netJoin(); }, 4000);
+    probeApi().then(function (found) {
+      if (!found) {
+        NET.on = false;
+        $('lobby').innerHTML = '<b style="color:#fca5a5">Race server unreachable</b> — ' +
+          'racing offline. Other players need to reach ' + esc(window.location.host) + '.';
+        netStatus();
+        return;
+      }
+      netJoin();
+    });
+    setInterval(function () { if (NET.on && !NET.joined) netJoin(); }, 4000);
     window.addEventListener('beforeunload', function () {
       if (NET.pid) navigator.sendBeacon && navigator.sendBeacon(
-        CFG.api + '/api/leave',
+        API_BASE + '/leave',
         new Blob([JSON.stringify({ room: CFG.room, pid: NET.pid })], { type: 'application/json' }));
     });
   } else {
@@ -1525,6 +1821,8 @@ GAME_JS = r"""
     state: state, racers: racers, me: me, cfg: CFG,
     startCountdown: beginCountdown, layout: LAY, trackLen: TRACK_LEN,
     autopilot: function (on) { state.autopilot = !!on; },
+    remotes: remotes, net: function () { return NET; },
+    apiBase: function () { return API_BASE; },
     reset: resetRace
   };
   requestAnimationFrame(frame);
@@ -1553,6 +1851,7 @@ def _body_html(cfg: Dict[str, Any]) -> str:
     <button id="btn-fs" title="Fullscreen (F)">⛶ Fullscreen</button>
     <button id="btn-cam" title="Camera (C)">🎥 Camera</button>
     <button id="btn-mute" title="Mute (M)">🔊 Sound</button>
+    <button id="btn-music" title="Music (B)">🎵 Music</button>
     <button id="btn-help">❔ Help</button>
   </div>
 
@@ -1565,6 +1864,10 @@ def _body_html(cfg: Dict[str, Any]) -> str:
 
   <div id="minimap" class="panel"><canvas id="mini" width="150" height="150"></canvas></div>
 
+  <div id="netchip"></div>
+  <div id="rotate"><span>📱↻</span><b>Turn your phone sideways</b>
+    <div style="color:#9fb3d9;font-weight:400">Landscape gives you the whole track
+    and both thumbs on the controls.</div></div>
   <div id="toast"></div>
   <div id="msg"></div>
 
@@ -1581,6 +1884,7 @@ def _body_html(cfg: Dict[str, Any]) -> str:
         <div><b>Camera</b> C</div>
         <div><b>Fullscreen</b> F</div>
         <div><b>Mute</b> M</div>
+        <div><b>Music</b> B</div>
         <div><b>Recover</b> R</div>
       </div>
       <div id="lobby"></div>

@@ -5,7 +5,7 @@ Turbo Racing League — Streamlit front end.
     streamlit run app.py
 
 Everything the browser needs is generated in Python:
-  * race_core.py  — players.json store + multiplayer room API server
+  * race_core.py  — players.json store + multiplayer room API
   * game_html.py  — the Three.js / Web Audio racing client
 """
 
@@ -26,6 +26,13 @@ st.set_page_config(page_title="Turbo Racing League", page_icon="🏎️", layout
 
 API_PORT = int(os.environ.get("RACE_API_PORT", "8765"))
 
+PAINTS = {
+    "Race red": 0xEF4444, "Electric blue": 0x3B82F6, "Circuit green": 0x22C55E,
+    "Sunset amber": 0xF59E0B, "Ultraviolet": 0xA855F7, "Cyan": 0x06B6D4,
+    "Hot pink": 0xEC4899, "Lime": 0x84CC16, "Gunmetal": 0x64748B,
+    "Pearl white": 0xE2E8F0, "Midnight": 0x1E293B, "Gold": 0xEAB308,
+}
+
 
 # --------------------------------------------------------------------------
 # Background services — started once per Streamlit process
@@ -37,11 +44,14 @@ def services():
     try:
         server = core.GameServer(board, rooms, port=API_PORT)
     except OSError:
-        server = core.GameServer(board, rooms, port=0)  # port busy → pick any free one
-    return server, board, rooms
+        server = core.GameServer(board, rooms, port=0)   # port busy → any free one
+    # Preferred path: serve the API from Streamlit's own port, so players only
+    # need one open port and HTTPS deployments stay same-origin.
+    mounted = core.attach_to_streamlit(board, rooms)
+    return server, board, rooms, mounted
 
 
-server, board, rooms = services()
+server, board, rooms, mounted = services()
 
 st.markdown(
     """
@@ -51,7 +61,6 @@ st.markdown(
   div[data-testid="stMetricValue"]{color:#38bdf8}
   div[data-testid="stMetricLabel"]{color:#8fa6cf}
   section[data-testid="stSidebar"]{background:#0a1122;border-right:1px solid rgba(120,160,255,.2)}
-  .stDataFrame{border:1px solid rgba(120,160,255,.22);border-radius:10px}
   .pill{display:inline-block;padding:4px 12px;margin:2px 4px 2px 0;border-radius:20px;
         background:rgba(56,189,248,.16);color:#7dd3fc;font-size:12px;font-weight:700}
   .code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:34px;font-weight:800;
@@ -65,6 +74,39 @@ st.markdown(
   .stButton>button{border:1px solid rgba(120,160,255,.3);background:rgba(56,189,248,.12);
         color:#e8eefc;font-weight:600}
   .stButton>button:hover{background:rgba(56,189,248,.28);color:#fff}
+
+  /* ---- league table ---- */
+  .league{width:100%;border-collapse:separate;border-spacing:0 4px;font-size:13px}
+  .league th{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#7e93bb;
+        font-weight:700;padding:0 10px 6px;text-align:left}
+  .league th.r,.league td.r{text-align:right}
+  .league td{background:rgba(19,28,50,.72);padding:9px 10px;
+        border-top:1px solid rgba(120,160,255,.12);
+        border-bottom:1px solid rgba(120,160,255,.12);
+        font-variant-numeric:tabular-nums}
+  .league td:first-child{border-left:1px solid rgba(120,160,255,.12);
+        border-radius:10px 0 0 10px}
+  .league td:last-child{border-right:1px solid rgba(120,160,255,.12);
+        border-radius:0 10px 10px 0}
+  .league tr.me td{background:rgba(56,189,248,.15);border-color:rgba(56,189,248,.45)}
+  .rank{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;
+        border-radius:7px;font-weight:800;font-size:12px;color:#0b1220;
+        background:rgba(148,163,184,.55)}
+  .rank.g1{background:linear-gradient(135deg,#fde68a,#f59e0b)}
+  .rank.g2{background:linear-gradient(135deg,#e2e8f0,#94a3b8)}
+  .rank.g3{background:linear-gradient(135deg,#fdba74,#c2703a)}
+  .drv{font-weight:700;color:#fff}
+  .sub{color:#8fa6cf;font-size:11px}
+  .ptbar{height:4px;border-radius:3px;background:rgba(255,255,255,.1);margin-top:5px}
+  .ptbar span{display:block;height:100%;border-radius:3px;
+        background:linear-gradient(90deg,#22d3ee,#38bdf8)}
+  .tnum{font-family:ui-monospace,Menlo,Consolas,monospace;color:#dbe6ff}
+  .empty{color:#8fa6cf;font-size:13px;padding:18px;text-align:center;
+        border:1px dashed rgba(120,160,255,.3);border-radius:12px}
+  .warn{background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.45);
+        color:#fecaca;border-radius:10px;padding:10px 12px;font-size:13px}
+  .good{background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.4);
+        color:#bbf7d0;border-radius:10px;padding:10px 12px;font-size:13px}
 </style>
 """,
     unsafe_allow_html=True,
@@ -76,33 +118,48 @@ st.markdown(
 # --------------------------------------------------------------------------
 qp = st.query_params
 ss = st.session_state
+
+
+def browser_port(default: int = 8501) -> int:
+    """The port this browser is actually connected on."""
+    try:
+        host = st.context.headers.get("Host", "")
+        if ":" in host:
+            return int(host.rsplit(":", 1)[1])
+    except Exception:
+        pass
+    return default
+
+
 ss.setdefault("mode", "room" if qp.get("room") else None)   # None | "solo" | "room"
 ss.setdefault("room_code", core.normalize_room(qp.get("room")) if qp.get("room") else "")
 ss.setdefault("driver", (qp.get("name") or "Player1")[:20])
 ss.setdefault("invited", bool(qp.get("room")))
-ss.setdefault("share_host", core.lan_ip())
-ss.setdefault("share_port", 8501)
+ss.setdefault("is_host", False)
+ss.setdefault("share_host", core.lan_ip_candidates()[0])
+ss.setdefault("share_port", browser_port())
 
 
 def invite_url(room: str) -> str:
     return f"http://{ss.share_host}:{int(ss.share_port)}/?room={room}"
 
 
-def qr_image_html(url: str, size: int = 200) -> str:
+def qr_image_html(url: str, size: int = 210) -> str:
     png = core.qr_png_bytes(url)
     if not png:
-        return ('<div style="color:#fca5a5">Install <code>qrcode[pil]</code> '
-                "to show the QR code.</div>")
+        return ('<div class="warn">Install <code>qrcode[pil]</code> to render the QR '
+                "image — the invite link below still works.</div>")
     b64 = base64.b64encode(png).decode()
     return (f'<img src="data:image/png;base64,{b64}" width="{size}" '
-            'style="border-radius:12px;border:6px solid #fff">')
+            'style="border-radius:12px;border:8px solid #fff">')
 
 
-def enter_room(code: str) -> None:
+def enter_room(code: str, host: bool = False) -> None:
     code = core.normalize_room(code)
     ss.room_code = code
     ss.mode = "room"
-    board.touch_driver(ss.driver, code)      # player recorded in players.json
+    ss.is_host = host
+    board.touch_driver(ss.driver, code)        # player recorded in players.json
     st.query_params["room"] = code
     st.rerun()
 
@@ -110,36 +167,80 @@ def enter_room(code: str) -> None:
 # --------------------------------------------------------------------------
 # Sidebar — race setup
 # --------------------------------------------------------------------------
+room_cfg = rooms.get_config(ss.room_code) if ss.room_code else {}
+locked = bool(room_cfg) and not ss.is_host
+
 with st.sidebar:
     st.markdown("## 🏎️ Race setup")
     driver = st.text_input("Driver name", value=ss.driver, max_chars=20)
     ss.driver = driver.strip() or "Player1"
 
+    if locked:
+        st.info(f"Room **{ss.room_code}** settings are set by whoever created it — "
+                "circuit, laps and engine are matched for everyone.")
+
+    track_opts = [1, 2, 3]
     track = st.selectbox(
-        "Circuit", [1, 2, 3],
+        "Circuit", track_opts,
+        index=track_opts.index(int(room_cfg.get("track", 1))) if locked else 0,
+        disabled=locked,
         format_func=lambda i: {1: "1 · Sunset Oval (easy)",
-                               2: "2 · Harbour S (technical)",
+                               2: "2 · Harbour Sweep (technical)",
                                3: "3 · Grand Circuit (hard)"}[i])
-    laps = st.slider("Laps", 1, 10, 3)
-    power = st.slider("Engine power", 1, 5, 3, help="Top speed and points multiplier")
+    laps = st.slider("Laps", 1, 10, int(room_cfg.get("laps", 3)) if locked else 3,
+                     disabled=locked)
+    power = st.slider("Engine power", 1, 5, int(room_cfg.get("power", 3)) if locked else 3,
+                      disabled=locked, help="Top speed and points multiplier")
+    if locked:
+        track, laps = int(room_cfg.get("track", 1)), int(room_cfg.get("laps", 3))
+        power = int(room_cfg.get("power", 3))
+
+    st.markdown("### 🎨 Cars")
+    paint_names = list(PAINTS)
+    c1_name = st.selectbox("Player 1 paint", paint_names, index=0)
+    hotseat = st.checkbox("Local 2-player (hot seat)",
+                          help="Both players on this keyboard: P2 drives with I / J / K / L, "
+                               "U for nitro")
+    p2_name, c2_name = "Player2", paint_names[1]
+    if hotseat:
+        p2_name = st.text_input("Player 2 name", value="Player2", max_chars=20)
+        c2_name = st.selectbox("Player 2 paint", paint_names, index=1)
 
     st.markdown("### 🤖 Opponents")
-    ai_count = st.slider("AI cars", 0, 6, 3)
+    ai_default = 0 if ss.mode == "room" else 3
+    ai_count = st.slider("AI cars", 0, 6, ai_default,
+                         help="In a room, keep this low so the grid stays about the "
+                              "real drivers.")
     skill = st.select_slider("AI skill", ["Rookie", "Pro", "Ace", "Legend"], value="Pro")
     skill_map = {"Rookie": 0.68, "Pro": 0.82, "Ace": 0.92, "Legend": 1.0}
-    hotseat = st.checkbox("Local 2-player (hot seat)",
-                          help="Player 2 drives with I / J / K / L, U for nitro")
-    p2_name = st.text_input("Player 2 name", value="Player2", max_chars=20) if hotseat else ""
+
+    st.markdown("### 🔊 Sound")
+    volume = st.slider("Effects volume", 0.0, 1.0, 0.8, 0.05)
+    music_volume = st.slider("Music volume", 0.0, 1.0, 0.35, 0.05,
+                             help="Drift-style backing loop; it ducks under the engine "
+                                  "and crashes automatically. B toggles it in-game.")
+    own_track = st.file_uploader("Use your own track (mp3 / ogg / wav)",
+                                 type=["mp3", "ogg", "wav", "m4a"])
+    music_url = None
+    if own_track is not None:
+        raw = own_track.getvalue()
+        if len(raw) > 8 * 1024 * 1024:
+            st.warning("That file is over 8 MB — trim it or it will slow the page down.")
+        else:
+            mime = {"mp3": "audio/mpeg", "ogg": "audio/ogg",
+                    "wav": "audio/wav", "m4a": "audio/mp4"}[own_track.name.rsplit(".", 1)[-1].lower()]
+            music_url = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+            st.caption(f"▶️ {own_track.name} will play instead of the built-in loop.")
 
     st.markdown("### 🎛️ Presentation")
     camera = st.radio("Camera", ["chase", "top", "cinematic"], horizontal=True)
     quality = st.radio("Graphics", ["high", "low"], horizontal=True,
                        help="Low disables shadows and antialiasing on slower machines")
-    volume = st.slider("Master volume", 0.0, 1.0, 0.8, 0.05)
     view_h = st.slider("Arena height (px)", 420, 1000, 640, 20)
 
     st.divider()
-    st.caption(f"API port **{server.port}** · data `{os.path.basename(core.DATA_PATH)}`")
+    st.caption(("API on Streamlit's own port ✅" if mounted
+                else f"API on port {server.port}") + f" · data `{os.path.basename(core.DATA_PATH)}`")
 
 
 # --------------------------------------------------------------------------
@@ -151,8 +252,9 @@ with head_l:
     st.markdown(
         '<span class="pill">↑ / W throttle</span><span class="pill">← → steer</span>'
         '<span class="pill">Space nitro</span><span class="pill">C camera</span>'
-        '<span class="pill">F fullscreen</span><span class="pill">M mute</span>'
-        '<span class="pill">R recover</span>', unsafe_allow_html=True)
+        '<span class="pill">F fullscreen</span><span class="pill">M sound</span>'
+        '<span class="pill">B music</span><span class="pill">R recover</span>',
+        unsafe_allow_html=True)
 with head_r:
     rec = board.driver(ss.driver)
     m1, m2 = st.columns(2)
@@ -161,7 +263,7 @@ with head_r:
 
 
 # --------------------------------------------------------------------------
-# LOBBY — create a room, join with a code, or race solo
+# LOBBY
 # --------------------------------------------------------------------------
 def lobby_gate() -> None:
     if ss.invited and ss.room_code:
@@ -172,20 +274,18 @@ def lobby_gate() -> None:
         if c2.button("🏁 Join this race", type="primary", use_container_width=True):
             ss.driver = (name or "Player").strip()[:20]
             enter_room(ss.room_code)
-        c3.caption("Everyone in the room races on the same circuit at the same time. "
-                   "The first driver to press START starts the countdown for all of you.")
+        c3.caption("You'll race the circuit and lap count the room's host picked. "
+                   "The first driver to press START begins the countdown for everyone.")
         st.divider()
 
     st.markdown("### 🎮 Choose how you want to race")
     a, b, c = st.columns(3)
-
     with a:
         st.markdown('<div class="lobbycard"><h4>🆕 Create a room</h4>'
                     '<p>Get a room code and a QR code, then let friends scan it to '
                     'race against you live.</p></div>', unsafe_allow_html=True)
         if st.button("Create room", use_container_width=True, key="mk"):
-            enter_room(core.new_room_code())
-
+            enter_room(core.new_room_code(), host=True)
     with b:
         st.markdown('<div class="lobbycard"><h4>🔑 Join with a code</h4>'
                     '<p>Got a 5-character code from whoever created the room? '
@@ -194,47 +294,71 @@ def lobby_gate() -> None:
                              placeholder="K7QD2", key="join_code",
                              label_visibility="collapsed")
         if st.button("Join room", use_container_width=True, key="jn"):
-            if core.normalize_room(code) == "LOBBY" and not code.strip():
+            if not code.strip():
                 st.warning("Enter a room code first.")
             else:
                 enter_room(code)
-
     with c:
         st.markdown('<div class="lobbycard"><h4>🏎️ Race solo</h4>'
-                    '<p>Straight into a race against the AI. Your results still go on '
-                    'the league leaderboard.</p></div>', unsafe_allow_html=True)
+                    '<p>Straight into a race against the AI — or share the keyboard '
+                    'with the hot-seat option in the sidebar.</p></div>',
+                    unsafe_allow_html=True)
         if st.button("Practice / solo race", use_container_width=True, key="solo"):
-            ss.mode = "solo"
-            ss.room_code = ""
+            ss.mode, ss.room_code, ss.is_host = "solo", "", False
             board.touch_driver(ss.driver)
             st.query_params.clear()
             st.rerun()
 
 
-def room_panel() -> None:
+def room_panel(track: int, laps: int, power: int) -> None:
     room = ss.room_code
+    if ss.is_host:                     # host's settings define the event
+        rooms.set_config(room, {"track": int(track), "laps": int(laps),
+                                "power": int(power), "host": ss.driver})
     url = invite_url(room)
     st.markdown("### 🌐 Room " + room)
-    c1, c2, c3 = st.columns([1, 1.25, 1.4])
+    c1, c2, c3 = st.columns([1, 1.25, 1.35])
 
     with c1:
         st.markdown(f'<div class="code">{room}</div>', unsafe_allow_html=True)
-        st.caption("Share this code — anyone can type it on the lobby screen.")
-        st.markdown(qr_image_html(url, 190), unsafe_allow_html=True)
-        st.caption("📱 Scan to join on a phone (touch controls appear automatically).")
+        st.markdown(qr_image_html(url), unsafe_allow_html=True)
+        st.caption("📱 Scan with a phone camera on the **same Wi-Fi**. "
+                   "Touch controls appear automatically.")
 
     with c2:
         st.markdown("**Invite link**")
         st.code(url, language=None)
-        st.markdown("**Address other players use**")
-        ss.share_host = st.text_input("Host / LAN IP", value=ss.share_host,
-                                      help="Use your computer's LAN IP so phones on the "
-                                           "same Wi-Fi can reach it — not 'localhost'.")
-        ss.share_port = st.number_input("Streamlit port", 1, 65535, int(ss.share_port))
+
+        ips = core.lan_ip_candidates()
+        options = ips + (["localhost"] if "localhost" not in ips else [])
+        if ss.share_host not in options:
+            options.insert(0, ss.share_host)
+        ss.share_host = st.selectbox(
+            "Address other players use", options,
+            index=options.index(ss.share_host),
+            help="Pick the address of the network your phone is on. A VPN or virtual "
+                 "adapter address will not be reachable.")
+        ss.share_port = st.number_input("Port", 1, 65535, int(ss.share_port))
+
+        if ss.share_host in ("localhost", "127.0.0.1"):
+            st.markdown('<div class="warn">A QR code pointing at <b>localhost</b> can '
+                        'only ever open on this computer. Choose a 192.168.x / 10.x '
+                        'address above.</div>', unsafe_allow_html=True)
+        if st.button("🔎 Check that phones can reach this"):
+            ok = core.port_reachable(ss.share_host, int(ss.share_port))
+            if ok:
+                st.markdown('<div class="good">Port is open on that address. If a phone '
+                            'still cannot load it, the two devices are on different '
+                            'networks (guest Wi-Fi, or mobile data).</div>',
+                            unsafe_allow_html=True)
+            else:
+                st.markdown(
+                    '<div class="warn">Nothing is listening on that address. Restart '
+                    'with <code>streamlit run app.py --server.address 0.0.0.0</code> '
+                    'and allow the port through your firewall.</div>',
+                    unsafe_allow_html=True)
         if st.button("🚪 Leave room"):
-            ss.mode = None
-            ss.room_code = ""
-            ss.invited = False
+            ss.mode, ss.room_code, ss.invited, ss.is_host = None, "", False, False
             st.query_params.clear()
             st.rerun()
 
@@ -248,12 +372,21 @@ def room_panel() -> None:
                     f'<span style="width:12px;height:12px;border-radius:50%;'
                     f'background:{p["color"]};display:inline-block"></span>'
                     f'<b>{p["name"]}</b>'
-                    f'<span style="color:#8fa6cf;font-size:12px">lap {p["lap"]}</span></div>',
+                    f'<span class="sub">lap {p["lap"]}</span></div>',
                     unsafe_allow_html=True)
         else:
-            st.caption("Nobody connected yet — the arena below joins automatically "
-                       "as soon as it loads.")
-        if st.button("🔄 Refresh room"):
+            st.caption("Nobody connected yet — the arena below joins automatically once "
+                       "it loads, and other players appear here within a second or two.")
+        cfg_now = rooms.get_config(room)
+        if cfg_now:
+            st.markdown(
+                f'<span class="pill">Circuit {cfg_now.get("track", 1)}</span>'
+                f'<span class="pill">{cfg_now.get("laps", 3)} laps</span>'
+                f'<span class="pill">Engine {cfg_now.get("power", 3)}/5</span>'
+                + (f'<span class="pill">Host {cfg_now.get("host", "?")}</span>'
+                   if cfg_now.get("host") else ""),
+                unsafe_allow_html=True)
+        if st.button("🔄 Refresh"):
             st.rerun()
 
 
@@ -262,7 +395,7 @@ if ss.mode is None:
     st.stop()
 
 if ss.mode == "room" and ss.room_code:
-    room_panel()
+    room_panel(track, laps, power)
 else:
     lb1, lb2 = st.columns([4, 1])
     lb1.info("Solo race — results are saved to the league leaderboard.")
@@ -285,9 +418,14 @@ cfg = {
     "aiCount": int(ai_count),
     "aiSkill": skill_map[skill],
     "volume": float(volume),
+    "musicVolume": float(music_volume),
+    "musicUrl": music_url,
     "quality": quality,
     "camera": camera,
     "hotseat": bool(hotseat),
+    "color1": PAINTS[c1_name],
+    "color2": PAINTS[c2_name],
+    "apiPrefix": core.API_PREFIX if mounted else None,
     "apiPort": int(server.port),
     "room": ss.room_code or None,
 }
@@ -303,32 +441,44 @@ with board_col:
     st.markdown("### 🏆 League leaderboard")
     st.caption(f"Written to `{os.path.basename(core.DATA_PATH)}` after every race.")
 
+    def league_table(rows) -> str:
+        top = max((r["points"] for r in rows), default=1) or 1
+        html = ['<table class="league"><tr><th>#</th><th>Driver</th>'
+                '<th class="r">Points</th><th class="r">Best lap</th></tr>']
+        for r in rows[:15]:
+            medal = f" g{r['rank']}" if r["rank"] <= 3 else ""
+            best = f"{r['best_lap']:.2f}s" if r.get("best_lap") else "—"
+            race = f"{r['best_time']:.2f}s" if r.get("best_time") else "—"
+            html.append(
+                f'<tr class="{"me" if r["name"] == ss.driver else ""}">'
+                f'<td><span class="rank{medal}">{r["rank"]}</span></td>'
+                f'<td><div class="drv">{r["name"]}</div>'
+                f'<div class="sub">{r["wins"]} wins · {r["races"]} races · '
+                f'{r["win_rate"]}% · best race {race}</div></td>'
+                f'<td class="r"><b class="tnum">{r["points"]:,}</b>'
+                f'<div class="ptbar"><span style="width:'
+                f'{max(4, round(100 * r["points"] / top))}%"></span></div></td>'
+                f'<td class="r tnum">{best}</td></tr>')
+        html.append("</table>")
+        return "".join(html)
+
     @st.fragment(run_every=3)
     def leaderboard_panel():
         rows = board.standings(50)
         if not rows:
-            st.info("No races recorded yet. Finish one to open the league table.")
+            st.markdown('<div class="empty">No races recorded yet.<br>'
+                        'Finish one to open the league table.</div>',
+                        unsafe_allow_html=True)
             return
-        df = pd.DataFrame(rows)
-        for col in ("best_time", "best_lap", "top_speed", "win_rate"):
-            if col not in df:
-                df[col] = None
-        show = df[["rank", "name", "points", "wins", "races", "win_rate",
-                   "best_time", "best_lap"]].rename(columns={
-            "rank": "#", "name": "Driver", "points": "Points", "wins": "Wins",
-            "races": "Races", "win_rate": "Win %", "best_time": "Best race (s)",
-            "best_lap": "Best lap (s)"})
-        st.dataframe(show, hide_index=True, use_container_width=True, height=330)
-
-        mine = df[df["name"] == ss.driver]
-        if not mine.empty:
-            r = mine.iloc[0]
+        st.markdown(league_table(rows), unsafe_allow_html=True)
+        mine = next((r for r in rows if r["name"] == ss.driver), None)
+        if mine:
             a, b = st.columns(2)
-            a.metric("Rank", f"#{int(r['rank'])}")
-            b.metric("Win rate", f"{r['win_rate']}%")
+            a.metric("Rank", f"#{mine['rank']}")
+            b.metric("Win rate", f"{mine['win_rate']}%")
             c, d = st.columns(2)
-            c.metric("Best lap", f"{r['best_lap']:.2f}s" if pd.notna(r["best_lap"]) else "—")
-            d.metric("Top speed", f"{int(r['top_speed'] or 0)} km/h")
+            c.metric("Best lap", f"{mine['best_lap']:.2f}s" if mine.get("best_lap") else "—")
+            d.metric("Top speed", f"{int(mine.get('top_speed') or 0)} km/h")
 
     leaderboard_panel()
 
@@ -347,8 +497,8 @@ with board_col:
             st.caption("Nothing yet.")
 
     with st.expander("💾 Player data (players.json)"):
-        st.caption("This is the file everything is stored in — download it to keep a "
-                   "backup or move the league to another machine.")
+        st.caption("Everything is stored in this one file — download it to keep a backup "
+                   "or move the league to another machine.")
         st.download_button("⬇️ Download players.json", board.export_json(),
                            "players.json", "application/json", use_container_width=True)
         rows = board.standings(500)
@@ -372,33 +522,41 @@ with board_col:
 # Help
 # --------------------------------------------------------------------------
 with st.expander("📖 How it all works"):
+    ips = ", ".join(core.lan_ip_candidates()[:3])
     st.markdown(
         f"""
-**Driving.** Throttle ↑/W, brake and reverse ↓/S, steer ←→ or A/D, **Space** for nitro
-(the purple bar refills when you're off the boost). Off the tarmac you lose grip and speed;
-the tyre wall scrubs most of it. **R** puts you back on the racing line.
+**Driving.** Throttle ↑/W, brake and reverse ↓/S, steer ←→ or A/D, **Space** for nitro.
+Off the tarmac you lose grip; the tyre wall scrubs most of your speed. **R** puts you back
+on the racing line. Hot seat gives Player 2 I/J/K/L and U.
 
-**Sound.** Synthesised in the browser with the Web Audio API — no audio files to download:
-engine note and revs tied to throttle and speed, wind rush, tyre screech when you slide or
-run wide, impact thud on contact, nitro whoosh, start-light beeps, a crowd that swells when
-you complete a lap or crash, and a winner's fanfare.
+**Sound.** All synthesised in the browser — engine revs tied to throttle and speed, wind
+rush, tyre screech, crash thud, nitro whoosh, a whoosh and a crowd swell when you take a
+place off someone, start-light beeps, lap cheers and a winner's fanfare. The backing loop
+is an original drift-style track that ducks under the engine and drops on impacts; **B**
+toggles it, and you can upload your own track in the sidebar instead.
 
-**Start / finish.** The gantry over the line carries the *START / FINISH* board with the
-circuit name and lap count, five start lights that light up red through the countdown, and
-the checkered line painted across the tarmac. A lap only counts when you pass all eight
-sectors in order, so cutting back across the line does nothing.
+**Two players.**
+*Same computer* — tick **Local 2-player (hot seat)** in the sidebar; both cars appear on
+the grid with the colours you chose.
+*Two devices* — create a room, then have the other player scan the QR or type the code.
+The room's host sets circuit, laps and engine, and everyone joining is matched to them, so
+you are always on the same track. The chip above the arena shows how many drivers are
+connected.
 
-**Rooms.** Create a room, share the code or let people scan the QR. Every browser posts its
-car position about twelve times a second to the API on port **{server.port}**, so everyone
-sees everyone else's car, name plate and gap live. Players on other devices must reach your
-machine: use `{core.lan_ip()}` rather than `localhost`, and allow ports 8501 and
-{server.port} through the firewall.
+**If the QR does not open on a phone:** both devices must be on the same Wi-Fi, and the
+address in the invite must be this computer's LAN address ({ips}) — not `localhost`, and
+not a VPN address. Start Streamlit with `--server.address 0.0.0.0`, allow the port through
+your firewall, and use **Check that phones can reach this** in the room panel.
+{"The race API is served on Streamlit's own port, so one open port is all you need."
+ if mounted else
+ f"The race API is on port {server.port}, so that port needs to be open too."}
 
 **Player data.** Every finished race is appended to `{os.path.basename(core.DATA_PATH)}`
 with position, total time, best lap, top speed and contacts. Points are Formula-style and
-scale with engine class. The file is written atomically, so it never ends up half-saved.
+scale with engine class.
 """
     )
 
 st.caption(f"Turbo Racing League · circuit {track} · {laps} laps · engine {power}/5 · "
-           f"host {socket.gethostname()} · API :{server.port}")
+           f"host {socket.gethostname()} · "
+           + ("API mounted on Streamlit" if mounted else f"API :{server.port}"))

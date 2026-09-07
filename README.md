@@ -35,12 +35,19 @@ Then open <http://localhost:8501>.
 | Nitro | Space (meter refills when you're off it) |
 | Camera (chase / top-down / cinematic) | C |
 | Fullscreen | F or the ⛶ button |
-| Mute | M |
+| Sound / music | M / B |
 | Recover onto the racing line | R |
 | Player 2 (hot seat) | I J K L, U for nitro |
 
-Phones get on-screen touch buttons automatically. Click the arena once so it
-takes keyboard focus.
+Click the arena once so it takes keyboard focus.
+
+### On a phone or tablet
+
+Touch devices get a purpose-built layout: steering under the left thumb, a large
+GAS pad plus BRAKE and NITRO under the right, haptic feedback where the device
+supports it, and a prompt to turn the phone landscape. The HUD rearranges for a
+small screen, page scroll and pinch-zoom are locked out while you drive, and
+shadows and antialiasing switch off automatically so the frame rate holds up.
 
 ---
 
@@ -58,7 +65,17 @@ audio files to download or ship:
 * **Crowd** — a pink-noise grandstand bed that swells when you complete a lap,
   crash or take the flag.
 * **Start lights** — three beeps and a long tone on GO.
+* **Overtake** — a passing whoosh, a chime and a crowd swell the moment you take
+  a place off someone, with the position call-out on screen.
 * **Winner** — a five-note fanfare (a lower three-note one if you didn't win).
+
+**Music.** An original drift-style loop — four-on-the-floor kick, off-beat hats, a
+driving bass line and a minor-pentatonic arp, all synthesised — sits under the
+race. It ducks automatically as you accelerate and dips on impacts so the engine
+and crashes always cut through, and it has its own volume slider. **B** toggles
+it. To race to your own music instead, upload an mp3/ogg/wav in the sidebar; it
+plays through the same ducking mix. (No commercial tracks are bundled — use your
+own files for anything you have the rights to.)
 
 Audio starts on the first click (browsers require a gesture), and M mutes it.
 
@@ -80,25 +97,53 @@ back over the line or cutting the corner behind it does nothing.
 
 ---
 
-## Multiplayer with a QR code
+## Two players
 
-1. On the lobby screen choose **Create room** — you get a 5-character code
-   (ambiguity-free alphabet, no O/0/I/1) and a QR code.
-2. Others scan the QR, or open the app and use **Join with a code**.
-3. Everyone lands on the same circuit. The first driver to press START begins
-   the countdown for the whole room.
+**Same computer** — tick *Local 2-player (hot seat)* in the sidebar. Player 1 uses
+the arrows, Player 2 uses I / J / K / L with U for nitro, and each picks their own
+paint colour.
 
-Each browser posts its car position ~12 times a second to a small JSON API that
-runs alongside Streamlit (port `8765` by default, override with
-`RACE_API_PORT`). Everyone sees everyone else's car, name plate and gap live.
+**Two devices**
 
-**For players on other devices**, set *Host / LAN IP* in the room panel to your
-machine's LAN address (not `localhost`) and allow ports **8501** and **8765**
-through your firewall. If you're on a hosted/HTTPS Streamlit deployment, browsers
-block the plain-HTTP API call — run it on your own network, or put the API behind
-the same HTTPS origin.
+1. Choose **Create room** — you get a 5-character code (no O/0/I/1, so it's easy
+   to read aloud) and a QR code.
+2. The other player scans it, or opens the app and uses **Join with a code**.
+3. The room's host sets circuit, laps and engine class; anyone joining is matched
+   to those settings automatically, so you're always racing the same event.
+4. The first driver to press START begins the countdown for everyone.
+
+Each browser posts its car position ~12×/sec, and the chip above the arena shows
+how many drivers are connected. The API is mounted on **Streamlit's own port**, so
+one open port (8501) covers everything and HTTPS deployments stay same-origin. If
+that mount ever fails on a future Streamlit release, it falls back to a standalone
+server on port 8765 (`RACE_API_PORT`) and the game finds it automatically.
+
+### If the QR code doesn't open on a phone
+
+Almost always one of these:
+
+* **Both devices must be on the same Wi-Fi.** Mobile data or a guest network
+  cannot reach your computer.
+* **The address must be your LAN IP**, not `localhost` — a QR pointing at
+  `localhost` opens the phone's own machine. Pick a `192.168.x` / `10.x` address
+  in the room panel's dropdown; it lists every address this machine has, so avoid
+  VPN and virtual-adapter ones.
+* **Streamlit must listen on all interfaces**:
+  `streamlit run app.py --server.address 0.0.0.0`
+* **The firewall must allow port 8501** (Windows: allow Python on private networks).
+
+The room panel has a **Check that phones can reach this** button that tests the
+address and port for you and says which of the above is wrong.
 
 ---
+
+## Cars, colours and names
+
+Player 1 and Player 2 each choose from twelve paints in the sidebar; the AI takes
+whatever colours are left, so no two cars look alike. Every driver's name floats
+above their car during the race, scaled by camera distance so it stays readable
+from the chase camera and from the top-down view, and your own car carries a
+coloured ground ring so you can find yourself in a pack.
 
 ## Player data
 
@@ -155,9 +200,15 @@ the same HTTPS origin.
 ## Testing
 
 ```bash
-python3 tests/test_core.py       # player store + room API
-python3 tests/run_headless.py    # full race in headless Chromium, checks for JS errors
+python3 tests/test_core.py        # player store + room API (25 checks)
+python3 tests/run_headless.py     # full race in headless Chromium, checks for JS errors
+python3 tests/run_multiplayer.py  # two real browsers in one room
 ```
+
+`run_multiplayer.py` opens two headless browsers against a real room server and
+asserts that each sees the other's car moving, that the host pressing START also
+starts the joiner, that chosen paint colours survive, and that both results land
+in `players.json`.
 
 `run_headless.py` swaps in a small maths-only stand-in for three.js, puts the AI
 in charge of the player car and asserts that the race starts, laps are credited,
