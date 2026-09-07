@@ -23,6 +23,7 @@ Then open <http://localhost:8501>.
 | `tests/test_core.py` | Unit tests for the player store and room API |
 | `tests/run_headless.py` | Drives a whole race in headless Chromium and checks for JS errors |
 | `tests/run_app_smoke.py` | Runs `app.py` in every lobby state against a stub Streamlit |
+| `tests/run_mobile.py` | Touch controls and fullscreen, with touch events emulated |
 | `tests/run_multiplayer.py` | Two real browsers in one room |
 | `players.json` | Created on first race — every driver, every result |
 
@@ -36,20 +37,35 @@ Then open <http://localhost:8501>.
 | Steer | ← → or A D |
 | Nitro | Space (meter refills when you're off it) |
 | Camera (chase / top-down / cinematic) | C |
-| Fullscreen | F or the ⛶ button |
+| Fullscreen | automatic on START; F or ⛶ to toggle, Esc to leave |
 | Sound / music | M / B |
 | Recover onto the racing line | R |
 | Player 2 (hot seat) | I J K L, U for nitro |
 
 Click the arena once so it takes keyboard focus.
 
+### Fullscreen
+
+Pressing **START RACE** takes the game fullscreen on desktop, laptop and phone —
+the click is the user gesture browsers require, so it can happen automatically.
+Where the real Fullscreen API is unavailable or blocked (iOS Safari, sandboxed
+iframes), the game expands its frame to fill the page instead, which looks the
+same and needs no permission. **Esc** or **F** returns to the page, and on Android
+it also asks the device to lock to landscape.
+
 ### On a phone or tablet
 
 Touch devices get a purpose-built layout: steering under the left thumb, a large
 GAS pad plus BRAKE and NITRO under the right, haptic feedback where the device
-supports it, and a prompt to turn the phone landscape. The HUD rearranges for a
-small screen, page scroll and pinch-zoom are locked out while you drive, and
-shadows and antialiasing switch off automatically so the frame rate holds up.
+supports it. The HUD rearranges for a small screen, page scroll and pinch-zoom are
+locked out while you drive, and shadows and antialiasing switch off automatically
+so the frame rate holds up.
+
+The landscape hint asks the **device** for its orientation rather than measuring
+the frame — the game sits in a tall, narrow iframe, so measuring the frame made
+the hint appear even when the phone was already sideways, and it covered the
+controls. It now disappears the moment you turn the phone, has a *Race in portrait
+anyway* button, and never shows in fullscreen.
 
 ---
 
@@ -222,6 +238,9 @@ join from anywhere.
 * The Streamlit API mount could raise `AttributeError` while scanning live
   objects and take the whole page down; it is fully guarded and now degrades to
   the standalone port instead.
+* The "turn your phone sideways" overlay measured the iframe rather than the
+  device, so it never went away — and it sat on top of the controls, which made
+  the game unplayable on a phone in landscape.
 
 ---
 
@@ -231,6 +250,7 @@ join from anywhere.
 python3 tests/test_core.py        # player store + room API (25 checks)
 python3 tests/run_app_smoke.py    # renders app.py in every lobby state, no Streamlit needed
 python3 tests/run_headless.py     # full race in headless Chromium, checks for JS errors
+python3 tests/run_mobile.py       # touch pads, rotate hint and fullscreen on start
 python3 tests/run_multiplayer.py  # two real browsers in one room
 ```
 

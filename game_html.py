@@ -41,6 +41,7 @@ DEFAULT_CFG: Dict[str, Any] = {
     "color2": 0x3b82f6,   # player 2 paint
     "musicVolume": 0.35,
     "musicUrl": None,     # optional own soundtrack (data: or http URL)
+    "autoFullscreen": True,
     "room": None,         # multiplayer room code (None = solo)
     "pid": None,
     "hotseat": False,     # second local player on WASD
@@ -159,6 +160,8 @@ table.res tr.me td{background:rgba(56,189,248,.14);color:#fff;font-weight:700}
   justify-content:center;flex-direction:column;gap:10px;text-align:center;
   background:rgba(5,7,15,.94);font-size:15px;font-weight:700;padding:24px}
 #rotate span{font-size:44px}
+#rotate .btn{font-size:13px;padding:9px 18px;margin-top:6px}
+body.bigframe #wrap{position:fixed;inset:0;width:100vw;height:100vh}
 
 @media (max-width:820px){
   #standings{display:none}
@@ -973,12 +976,37 @@ GAME_JS = r"""
     if (k === 'c') cycleCamera();
     if (k === 'm') showMsg(AUDIO.toggleMute() ? '🔇 Sound off' : '🔊 Sound on');
     if (k === 'f') toggleFullscreen();
+    if (e.key === 'Escape' && theatre) exitFullscreen();
     if (k === 'b') showMsg(AUDIO.toggleMusic() ? '🎵 Music on' : '🎵 Music off');
     if (k === 'r' && state.phase === 'racing') respawn(me);
     if (k === 'enter' && state.phase === 'ready') beginCountdown();
   });
   window.addEventListener('keyup', function (e) { keys[e.key] = false; });
   window.addEventListener('blur', function () { keys = {}; });
+
+  // The game runs in a fixed-height iframe, so the frame is portrait-shaped even
+  // when the phone is not. Ask the device about its orientation instead.
+  var rotateDismissed = false;
+  function devicePortrait() {
+    try {
+      var t = window.screen && window.screen.orientation && window.screen.orientation.type;
+      if (t) return t.indexOf('portrait') === 0;
+    } catch (e) { /* not supported */ }
+    if (typeof window.orientation === 'number') return Math.abs(window.orientation) !== 90;
+    try {
+      if (window.top && window.top !== window) {
+        return window.top.innerHeight > window.top.innerWidth;
+      }
+    } catch (e) { /* cross-origin parent */ }
+    return window.innerHeight > window.innerWidth;
+  }
+  function orient() {
+    var el = $('rotate');
+    if (!el) return;
+    var show = IS_TOUCH && devicePortrait() && !rotateDismissed && !isFullscreen();
+    el.style.display = show ? 'flex' : 'none';
+    resize();
+  }
 
   // Touch controls for phones joining via the QR code: steering under the left
   // thumb, throttle and nitro under the right, sized for real thumbs.
@@ -1020,13 +1048,12 @@ GAME_JS = r"""
       if (e.target.closest && e.target.closest('#touchpad')) e.preventDefault();
     }, { passive: false });
 
-    // Nudge the player into landscape, where the track actually fits.
-    function orient() {
-      var portrait = window.innerHeight > window.innerWidth;
-      $('rotate').style.display = portrait ? 'flex' : 'none';
-    }
     window.addEventListener('resize', orient);
-    window.addEventListener('orientationchange', function () { setTimeout(orient, 250); });
+    window.addEventListener('orientationchange', function () { setTimeout(orient, 300); });
+    $('rotate-skip').addEventListener('click', function () {
+      rotateDismissed = true;
+      orient();
+    });
     orient();
   }
   bindTouch();
@@ -1527,6 +1554,9 @@ GAME_JS = r"""
 
   function beginCountdown(seconds) {
     if (state.phase !== 'ready') return;
+    // The START click is a user gesture, which is exactly what browsers require
+    // before granting fullscreen — so this is the one moment it can be automatic.
+    if (CFG.autoFullscreen !== false && !isFullscreen()) goFullscreen();
     AUDIO.start();
     AUDIO.initMusic(CFG.musicVolume, CFG.musicUrl);
     AUDIO.baseCrowd = 0.055;
@@ -1595,52 +1625,114 @@ GAME_JS = r"""
   }
 
   /* ===================================================================
-     12. FULLSCREEN
+     12. FULLSCREEN — one call that works on desktop, Android and iOS
      =================================================================== */
-  var expanded = false;
-  function toggleFullscreen() {
-    var el = document.documentElement;
-    var fsActive = document.fullscreenElement || document.webkitFullscreenElement;
-    if (fsActive) {
-      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-      return;
-    }
-    // Streamlit renders us in an iframe: make sure it may go fullscreen.
-    try {
-      if (window.frameElement) {
-        window.frameElement.setAttribute('allowfullscreen', 'true');
-        window.frameElement.setAttribute('allow', 'fullscreen; autoplay');
-      }
-    } catch (e) { /* cross-origin: ignore */ }
-    var req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
-    if (req) {
-      var p = req.call(el);
-      if (p && p.catch) p.catch(expandInPage);
-    } else {
-      expandInPage();
-    }
-    setTimeout(resize, 120);
+  var theatre = false;
+
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement ||
+      document.msFullscreenElement || theatre);
   }
-  function expandInPage() {
-    // Fallback: blow the iframe up to fill the host page.
+
+  function allowFrameFullscreen() {
+    // Streamlit embeds us in an iframe; it needs the attribute before the
+    // request or the browser rejects it outright.
     try {
       var fe = window.frameElement;
-      if (!fe) { showMsg('Fullscreen blocked by the browser'); return; }
-      expanded = !expanded;
-      if (expanded) {
-        fe.dataset.oldStyle = fe.getAttribute('style') || '';
-        fe.setAttribute('style',
-          'position:fixed;inset:0;width:100vw;height:100vh;z-index:2147483647;border:0;background:#05070f');
-      } else {
-        fe.setAttribute('style', fe.dataset.oldStyle || '');
+      if (fe) {
+        fe.setAttribute('allowfullscreen', 'true');
+        fe.setAttribute('allow', 'fullscreen; autoplay; screen-wake-lock');
       }
-      showMsg(expanded ? 'Theatre mode — press F to exit' : 'Theatre mode off');
-    } catch (e) {
-      showMsg('Fullscreen blocked by the browser');
-    }
-    setTimeout(resize, 150);
+    } catch (e) { /* cross-origin parent — theatre mode covers it */ }
   }
-  document.addEventListener('fullscreenchange', function () { setTimeout(resize, 60); });
+
+  function lockLandscape() {
+    if (!IS_TOUCH) return;
+    try {
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape').catch(function () {});
+      }
+    } catch (e) { /* iOS and desktop don't allow this; the hint covers it */ }
+    setTimeout(orient, 300);
+  }
+
+  function enterTheatre() {
+    // Fallback for iOS Safari and sandboxed iframes: blow the frame up to fill
+    // the page it sits in. Looks like fullscreen, needs no permission.
+    try {
+      var fe = window.frameElement;
+      if (!fe) { document.body.classList.add('bigframe'); theatre = true; return true; }
+      if (!fe.dataset.oldStyle) fe.dataset.oldStyle = fe.getAttribute('style') || '';
+      fe.setAttribute('style',
+        'position:fixed;inset:0;width:100vw;height:100vh;max-width:none;z-index:2147483647;' +
+        'border:0;background:#05070f');
+      try {
+        var pdoc = fe.ownerDocument;
+        pdoc.body.dataset.raceOverflow = pdoc.body.style.overflow || '';
+        pdoc.body.style.overflow = 'hidden';
+        pdoc.documentElement.scrollTop = 0;
+      } catch (e) { /* ignore */ }
+      try { fe.scrollIntoView({ block: 'start' }); } catch (e) { /* ignore */ }
+      theatre = true;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function leaveTheatre() {
+    try {
+      var fe = window.frameElement;
+      if (fe) {
+        fe.setAttribute('style', fe.dataset.oldStyle || '');
+        try {
+          var pdoc = fe.ownerDocument;
+          pdoc.body.style.overflow = pdoc.body.dataset.raceOverflow || '';
+        } catch (e) { /* ignore */ }
+      }
+    } catch (e) { /* ignore */ }
+    document.body.classList.remove('bigframe');
+    theatre = false;
+  }
+
+  function goFullscreen() {
+    allowFrameFullscreen();
+    var el = document.documentElement;
+    var req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    var done = function () { lockLandscape(); setTimeout(resize, 150); orient(); };
+    if (!req) { enterTheatre(); done(); return; }
+    var p;
+    try { p = req.call(el); } catch (e) { p = null; }
+    if (p && p.then) {
+      p.then(done).catch(function () { enterTheatre(); done(); });
+    } else {
+      // Older APIs return nothing: check whether it actually happened.
+      setTimeout(function () {
+        if (!document.fullscreenElement && !document.webkitFullscreenElement) enterTheatre();
+        done();
+      }, 350);
+    }
+  }
+
+  function exitFullscreen() {
+    if (theatre) { leaveTheatre(); setTimeout(resize, 120); orient(); return; }
+    var ex = document.exitFullscreen || document.webkitExitFullscreen ||
+      document.msExitFullscreen;
+    if (ex) { try { ex.call(document); } catch (e) { /* ignore */ } }
+    setTimeout(function () { resize(); orient(); }, 150);
+  }
+
+  function toggleFullscreen() {
+    if (isFullscreen()) exitFullscreen();
+    else goFullscreen();
+  }
+
+  document.addEventListener('fullscreenchange', function () {
+    setTimeout(function () { resize(); orient(); }, 60);
+  });
+  document.addEventListener('webkitfullscreenchange', function () {
+    setTimeout(function () { resize(); orient(); }, 60);
+  });
 
   /* ===================================================================
      13. MAIN LOOP
@@ -1764,13 +1856,22 @@ GAME_JS = r"""
      =================================================================== */
   $('btn-start').addEventListener('click', function () { beginCountdown(); });
   $('btn-again').addEventListener('click', function () { resetRace(); });
-  $('btn-fs').addEventListener('click', toggleFullscreen);
+  $('btn-fs').addEventListener('click', function () {
+    toggleFullscreen();
+    var self = this;
+    setTimeout(function () {
+      self.textContent = isFullscreen() ? '⤡ Exit full' : '⛶ Fullscreen';
+    }, 400);
+  });
   $('btn-cam').addEventListener('click', cycleCamera);
   $('btn-mute').addEventListener('click', function () {
     AUDIO.start();
     this.textContent = AUDIO.toggleMute() ? '🔇 Sound' : '🔊 Sound';
   });
   $('btn-music').addEventListener('click', function () {
+    // The START click is a user gesture, which is exactly what browsers require
+    // before granting fullscreen — so this is the one moment it can be automatic.
+    if (CFG.autoFullscreen !== false && !isFullscreen()) goFullscreen();
     AUDIO.start();
     AUDIO.initMusic(CFG.musicVolume, CFG.musicUrl);
     this.textContent = AUDIO.toggleMusic() ? '🎵 Music' : '🎵 Music off';
@@ -1866,8 +1967,9 @@ def _body_html(cfg: Dict[str, Any]) -> str:
 
   <div id="netchip"></div>
   <div id="rotate"><span>📱↻</span><b>Turn your phone sideways</b>
-    <div style="color:#9fb3d9;font-weight:400">Landscape gives you the whole track
-    and both thumbs on the controls.</div></div>
+    <div style="color:#9fb3d9;font-weight:400;max-width:320px">Landscape gives you the
+    whole track and both thumbs on the controls.</div>
+    <button class="btn" id="rotate-skip">Race in portrait anyway</button></div>
   <div id="toast"></div>
   <div id="msg"></div>
 

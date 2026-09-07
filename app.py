@@ -277,6 +277,9 @@ with st.sidebar:
             st.caption(f"▶️ {own_track.name} will play instead of the built-in loop.")
 
     st.markdown("### 🎛️ Presentation")
+    auto_fs = st.checkbox("Go fullscreen when the race starts", value=True,
+                          help="Uses the START click as the gesture browsers require. "
+                               "Esc or F comes back.")
     camera = st.radio("Camera", ["chase", "top", "cinematic"], horizontal=True)
     quality = st.radio("Graphics", ["high", "low"], horizontal=True,
                        help="Low disables shadows and antialiasing on slower machines")
@@ -494,6 +497,7 @@ cfg = {
     "quality": quality,
     "camera": camera,
     "hotseat": bool(hotseat),
+    "autoFullscreen": bool(auto_fs),
     "color1": PAINTS[c1_name],
     "color2": PAINTS[c2_name],
     "apiPrefix": core.API_PREFIX if mounted else None,
@@ -505,8 +509,9 @@ game_col, board_col = st.columns([2.6, 1.15])
 
 with game_col:
     components.html(build_game_html(cfg), height=int(view_h) + 10, scrolling=False)
-    st.caption("Click the arena once so it takes the keyboard. **F** (or ⛶) goes "
-               "fullscreen — **Esc** or **F** again comes back.")
+    st.caption("Pressing **START RACE** takes the game fullscreen on desktop and "
+               "phones — **Esc** or **F** comes back. On a phone, turn it sideways "
+               "for the full width of the track.")
 
 with board_col:
     st.markdown("### 🏆 League leaderboard")
