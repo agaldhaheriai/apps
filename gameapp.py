@@ -1,37 +1,55 @@
-# Import system libraries
-import streamlit as st  # Main web framework
-import pandas as pd  # Data manipulation library
-import streamlit.components.v1 as components  # Embedded HTML/JS renderer
+# Save this file as exporter.py and run: python exporter.py
 
-# Set page configuration for 3D game layout with automotive theme styling
+app_code = """import streamlit as st
+import pandas as pd
+import streamlit.components.v1 as components
+
+# Page Configuration
 st.set_page_config(
     page_title="3D Turbo Racing League", layout="wide", page_icon="🏎️"
 )
 
-# Custom Automotive Theme Styling
-st.markdown("""
+# Custom High-Contrast Styling
+st.markdown(\"\"\"
 <style>
-    /* Dark Automotive Background Theme */
     .stApp {
-        background: linear-gradient(rgba(15, 15, 20, 0.88), rgba(15, 15, 20, 0.95)), 
+        background: linear-gradient(rgba(10, 10, 15, 0.75), rgba(10, 10, 15, 0.85)), 
                     url('https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?auto=format&fit=crop&w=1920&q=80');
         background-size: cover;
         background-attachment: fixed;
+        background-position: center;
     }
+    
+    html, body, [class*="css"], .stMarkdown, h1, h2, h3, h4, h5, h6, p, span, label, div {
+        color: #FFFFFF !important;
+        text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.9);
+    }
+    
     .stTabs [data-baseweb="tab-list"] {
-        background-color: rgba(30, 30, 40, 0.8);
+        background-color: rgba(20, 20, 30, 0.9);
         border-radius: 8px;
+        padding: 5px;
     }
     .stTabs [data-baseweb="tab"] {
-        color: #ffffff !important;
+        color: #E0E0E0 !important;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #00FFCC !important;
+        border-bottom-color: #00FFCC !important;
+    }
+    
+    input, select, textarea, div[role="combobox"] {
+        color: #FFFFFF !important;
+        background-color: rgba(25, 30, 40, 0.95) !important;
     }
 </style>
-""", unsafe_allow_html=True)
+\"\"\", unsafe_allow_html=True)
 
-# Initialize Session State Data Structures
+# State Management
 if "sessions" not in st.session_state:
     st.session_state.sessions = {
-        "Session #101 (Speedway)": {"host": "ProRacer", "players": ["ProRacer"], "max": 2, "status": "Waiting"},
+        "Session #101 (Night Track)": {"host": "ProRacer", "players": ["ProRacer"], "max": 2, "status": "Waiting"},
         "Session #102 (Circuit)": {"host": "DriftKing", "players": ["DriftKing"], "max": 2, "status": "Waiting"}
     }
 
@@ -43,7 +61,6 @@ if "leaderboard" not in st.session_state:
 
 if "current_user" not in st.session_state:
     st.session_state.current_user = "Racer1"
-
 
 def record_win(winner, time_sec, speed_lvl):
     if winner not in st.session_state.leaderboard:
@@ -57,14 +74,11 @@ def record_win(winner, time_sec, speed_lvl):
     if time_sec < entry["Fastest Time (s)"]:
         entry["Fastest Time (s)"] = round(time_sec, 2)
 
-
-# App Header Setup
 st.title("🏎️ 3D Low-Poly Racing Engine")
-st.caption("Custom Track Boundaries | AI Bot Opponent | Progressive Level Difficulty")
+st.caption("Arrow Keys: Steering & Throttle | Spacebar: Nitro Boost | WebAudio Engine Revs & Particle FX")
 
-# Navigation Tabs
 tab_player, tab_arena, tab_lobbies, tab_ranks = st.tabs([
-    "👤 Player Setup", "🏁 3D Race Arena", "🌐 Game Lobbies", "🏆 Leaderboard"
+    "👤 Player Setup", "🏁 Immersive 3D Arena", "🌐 Game Lobbies", "🏆 Leaderboard"
 ])
 
 # --- TAB 1: PLAYER REGISTRATION ---
@@ -98,7 +112,7 @@ with tab_player:
     st.divider()
     st.markdown(f"**Current Driver Active:** `{st.session_state.current_user}`")
 
-# --- TAB 2: 3D RACE ARENA ---
+# --- TAB 2: IMMERSIVE 3D ARENA ---
 with tab_arena:
     col1, col2, col3, col4, col5 = st.columns([1.2, 1.2, 1, 1, 1.2])
     
@@ -109,139 +123,204 @@ with tab_arena:
         p2_driver = p2_input.strip() if p2_input.strip() else "CPU_Bot (AI)"
         is_cpu = not bool(p2_input.strip())
     with col3:
-        level_choice = st.selectbox("Track Level Difficulty:", [1, 2, 3], format_func=lambda x: f"Level {x} " + ("(Oval)" if x==1 else "(Figure 8)" if x==2 else "(Complex Circuit)"))
+        level_choice = st.selectbox("Track Level:", [1, 2, 3], format_func=lambda x: f"Level {x} " + ("(Oval)" if x==1 else "(Figure 8)" if x==2 else "(Circuit)"))
     with col4:
-        speed_lvl = st.slider("Engine Speed", 1, 5, 3, key="speed_setting")
+        speed_lvl = st.slider("Engine Power", 1, 5, 3, key="speed_setting")
     with col5:
         camera_view = st.selectbox("3D Camera:", ["Chase Cam (Behind)", "Third-Person (High)", "Top-Down (Map)"])
 
     st.markdown(
         f"**🎮 Mode:** {'**Player vs AI Bot**' if is_cpu else '**2-Player Local**'} | "
-        "**Controls:** **P1 (Red):** `W` (Gas), `A` (Left), `D` (Right), `S` (Reverse)" + 
-        ("" if is_cpu else " | **P2 (Blue):** `Up Arrow`, `Left Arrow`, `Right Arrow`, `Down Arrow`")
+        "**Controls:** **P1:** `Up` (Gas), `Left`/`Right` (Steer), `Down` (Brake/Reverse), `Space` (Nitro Boost)"
     )
 
-    # Embedded HTML/Three.js Game Renderer
-    threejs_html = f"""
+    # Immersive Three.js Engine
+    threejs_html = f\"\"\"
     <!DOCTYPE html>
     <html>
     <head>
         <style>
-            body {{ margin: 0; overflow: hidden; background-color: #111; font-family: sans-serif; }}
+            body {{ margin: 0; overflow: hidden; background-color: #05050a; font-family: 'Segoe UI', sans-serif; }}
             #hud {{ 
-                position: absolute; top: 10px; left: 10px; color: #fff; 
-                font-weight: bold; font-size: 15px; text-shadow: 2px 2px 4px #000; z-index: 10;
-                background: rgba(0,0,0,0.6); padding: 10px; border-radius: 6px;
+                position: absolute; top: 12px; left: 12px; color: #fff; 
+                font-weight: bold; font-size: 14px; text-shadow: 2px 2px 4px #000; z-index: 10;
+                background: rgba(10, 12, 20, 0.75); padding: 12px 18px; border-radius: 8px;
+                border: 1px solid rgba(0,255,204,0.3); backdrop-filter: blur(4px);
             }}
             #start-btn {{
                 position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-                padding: 15px 35px; font-size: 22px; font-weight: bold; color: #fff;
-                background: #e63946; border: none; border-radius: 8px; cursor: pointer;
-                box-shadow: 0 4px 15px rgba(230,57,70,0.5); z-index: 20;
+                padding: 18px 42px; font-size: 24px; font-weight: bold; color: #fff;
+                background: linear-gradient(45deg, #ff0055, #ff5500); border: none; border-radius: 12px; cursor: pointer;
+                box-shadow: 0 0 25px rgba(255,0,85,0.6); z-index: 20; transition: all 0.2s;
             }}
-            #start-btn:hover {{ background: #d62839; }}
-            canvas {{ display: block; width: 100vw; height: 520px; }}
+            #start-btn:hover {{ transform: translate(-50%, -50%) scale(1.05); }}
+            canvas {{ display: block; width: 100vw; height: 550px; }}
         </style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     </head>
     <body>
-        <button id="start-btn" onclick="startRace()">🚀 START RACE</button>
+        <button id="start-btn" onclick="startRace()">🏁 START RACE</button>
         <div id="hud">
-            🏁 Level {level_choice} Track | Speed: {speed_lvl}<br>
-            ⏱️ Timer: <span id="timer-display" style="color:#00ffcc;">0.0s</span><br>
+            🏎️ Level {level_choice} Track | Engine Power: {speed_lvl}<br>
+            ⏱️ Time: <span id="timer-display" style="color:#00ffcc;">0.0s</span><br>
             <span id="p1-hud" style="color: #ff4444;">{p1_driver}: Lap 0/3</span> | 
             <span id="p2-hud" style="color: #4488ff;">{p2_driver}: Lap 0/3</span><br>
-            <span id="game-status" style="color: #ffcc00;">Click START RACE to begin countdown!</span>
+            <span id="game-status" style="color: #ffcc00;">Click START RACE to enable Audio & Ignition!</span>
         </div>
         <script>
-            // Scene Setup
-            const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a24);
-            scene.fog = new THREE.Fog(0x1a1a24, 20, 160);
+            // Audio Engine using Web Audio API
+            let audioCtx, osc, gainNode;
+            function initAudio() {{
+                if (!audioCtx) {{
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    osc = audioCtx.createOscillator();
+                    gainNode = audioCtx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(60, audioCtx.currentTime);
+                    gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime);
+                    osc.connect(gainNode);
+                    gainNode.connect(audioCtx.destination);
+                    osc.start();
+                }}
+            }}
+            function updateEngineSound(speedRatio) {{
+                if (audioCtx && osc) {{
+                    const pitch = 60 + (speedRatio * 220);
+                    osc.frequency.setTargetAtTime(pitch, audioCtx.currentTime, 0.05);
+                }}
+            }}
 
-            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / 520, 0.1, 1000);
+            // Three.js Scene Setup
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a12);
+            scene.fog = new THREE.FogExp2(0x0a0a12, 0.008);
+
+            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / 550, 0.1, 1000);
             const renderer = new THREE.WebGLRenderer({{ antialias: true }});
-            renderer.setSize(window.innerWidth, 520);
+            renderer.setSize(window.innerWidth, 550);
             renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             document.body.appendChild(renderer.domElement);
 
-            // Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            // Lighting Setup
+            const ambientLight = new THREE.AmbientLight(0x222233, 0.8);
             scene.add(ambientLight);
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
-            dirLight.position.set(40, 80, 40);
+            
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+            dirLight.position.set(50, 100, 50);
             dirLight.castShadow = true;
             scene.add(dirLight);
 
-            // Ground
-            const groundGeo = new THREE.PlaneGeometry(250, 250);
-            const groundMat = new THREE.MeshLambertMaterial({{ color: 0x223322 }});
+            // Ground Track Base
+            const groundGeo = new THREE.PlaneGeometry(300, 300);
+            const groundMat = new THREE.MeshStandardMaterial({{ color: 0x081008, roughness: 0.9 }});
             const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.receiveShadow = true;
             scene.add(ground);
 
-            // Track Level Paths Configuration
+            // Level Track Generation
             const level = {level_choice};
             let trackCurve;
-            const trackWidth = 7;
+            const trackWidth = 8;
 
-            if (level === 1) {{ // Level 1: Oval
+            if (level === 1) {{
                 trackCurve = new THREE.CatmullRomCurve3([
-                    new THREE.Vector3(-30, 0, 20), new THREE.Vector3(30, 0, 20),
-                    new THREE.Vector3(45, 0, 0), new THREE.Vector3(30, 0, -20),
-                    new THREE.Vector3(-30, 0, -20), new THREE.Vector3(-45, 0, 0)
+                    new THREE.Vector3(-35, 0, 25), new THREE.Vector3(35, 0, 25),
+                    new THREE.Vector3(50, 0, 0), new THREE.Vector3(35, 0, -25),
+                    new THREE.Vector3(-35, 0, -25), new THREE.Vector3(-50, 0, 0)
                 ], true);
-            }} else if (level === 2) {{ // Level 2: Figure 8 Loop
+            }} else if (level === 2) {{
                 trackCurve = new THREE.CatmullRomCurve3([
-                    new THREE.Vector3(-35, 0, 25), new THREE.Vector3(0, 0, 0),
-                    new THREE.Vector3(35, 0, -25), new THREE.Vector3(45, 0, 0),
-                    new THREE.Vector3(35, 0, 25), new THREE.Vector3(0, 0, 0),
-                    new THREE.Vector3(-35, 0, -25), new THREE.Vector3(-45, 0, 0)
+                    new THREE.Vector3(-40, 0, 30), new THREE.Vector3(0, 0, 0),
+                    new THREE.Vector3(40, 0, -30), new THREE.Vector3(50, 0, 0),
+                    new THREE.Vector3(40, 0, 30), new THREE.Vector3(0, 0, 0),
+                    new THREE.Vector3(-40, 0, -30), new THREE.Vector3(-50, 0, 0)
                 ], true);
-            }} else {{ // Level 3: Complex Multi-Turn Circuit
+            }} else {{
                 trackCurve = new THREE.CatmullRomCurve3([
-                    new THREE.Vector3(-40, 0, 30), new THREE.Vector3(10, 0, 35),
-                    new THREE.Vector3(40, 0, 20), new THREE.Vector3(20, 0, -10),
-                    new THREE.Vector3(40, 0, -35), new THREE.Vector3(-10, 0, -25),
-                    new THREE.Vector3(-35, 0, -35), new THREE.Vector3(-25, 0, 0)
+                    new THREE.Vector3(-45, 0, 35), new THREE.Vector3(15, 0, 40),
+                    new THREE.Vector3(45, 0, 20), new THREE.Vector3(25, 0, -15),
+                    new THREE.Vector3(-45, 0, -40), new THREE.Vector3(-15, 0, -30),
+                    new THREE.Vector3(-40, 0, -40), new THREE.Vector3(-30, 0, 0)
                 ], true);
             }}
 
-            // Render Track Surface
-            const trackGeo = new THREE.TubeGeometry(trackCurve, 120, trackWidth, 8, true);
-            const trackMat = new THREE.MeshLambertMaterial({{ color: 0x333338 }});
+            const trackGeo = new THREE.TubeGeometry(trackCurve, 150, trackWidth, 8, true);
+            const trackMat = new THREE.MeshStandardMaterial({{ color: 0x222228, roughness: 0.4, metalness: 0.1 }});
             const trackMesh = new THREE.Mesh(trackGeo, trackMat);
-            trackMesh.scale.set(1, 0.01, 1); // Flatten tube into surface
+            trackMesh.scale.set(1, 0.01, 1);
             trackMesh.position.y = 0.02;
             scene.add(trackMesh);
 
-            // Car Factory
+            // Detailed Vehicle Factory
             function createCar(colorHex) {{
                 const carGroup = new THREE.Group();
-                const bodyGeo = new THREE.BoxGeometry(1.8, 0.7, 3.2);
-                const bodyMat = new THREE.MeshLambertMaterial({{ color: colorHex }});
+                
+                // Chassis
+                const bodyGeo = new THREE.BoxGeometry(2.0, 0.6, 3.8);
+                const bodyMat = new THREE.MeshStandardMaterial({{ color: colorHex, roughness: 0.2, metalness: 0.5 }});
                 const body = new THREE.Mesh(bodyGeo, bodyMat);
                 body.position.y = 0.5;
                 body.castShadow = true;
                 carGroup.add(body);
 
-                const cabinGeo = new THREE.BoxGeometry(1.4, 0.6, 1.6);
-                const cabinMat = new THREE.MeshLambertMaterial({{ color: 0x111111 }});
+                // Cabin
+                const cabinGeo = new THREE.BoxGeometry(1.5, 0.5, 1.8);
+                const cabinMat = new THREE.MeshStandardMaterial({{ color: 0x050505, roughness: 0.1 }});
                 const cabin = new THREE.Mesh(cabinGeo, cabinMat);
-                cabin.position.set(0, 1.0, -0.2);
+                cabin.position.set(0, 0.9, -0.2);
                 carGroup.add(cabin);
+
+                // Headlights
+                const headlightMat = new THREE.MeshBasicMaterial({{ color: 0xffffaa }});
+                const hl1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.15, 0.1), headlightMat);
+                hl1.position.set(-0.7, 0.5, 1.9);
+                const hl2 = hl1.clone();
+                hl2.position.set(0.7, 0.5, 1.9);
+                carGroup.add(hl1);
+                carGroup.add(hl2);
+
+                // Spotlights Beam
+                const spotLight = new THREE.SpotLight(0xffffaa, 2, 25, Math.PI / 6, 0.5);
+                spotLight.position.set(0, 0.6, 1.8);
+                spotLight.target.position.set(0, 0, 10);
+                carGroup.add(spotLight);
+                carGroup.add(spotLight.target);
 
                 scene.add(carGroup);
                 return carGroup;
             }}
 
-            const car1 = createCar(0xff3333); // Red (P1)
-            const car2 = createCar(0x3388ff); // Blue (P2 / AI)
+            const car1 = createCar(0xff2244);
+            const car2 = createCar(0x2288ff);
 
-            // Track Coordinates Sampling for Collision & AI Navigation
+            // Particles System (Tire Smoke & Nitro Flame)
+            const particles = [];
+            function createParticle(x, y, z, colorHex) {{
+                const pGeo = new THREE.SphereGeometry(0.15 + Math.random() * 0.1, 4, 4);
+                const pMat = new THREE.MeshBasicMaterial({{ color: colorHex, transparent: true, opacity: 0.8 }});
+                const p = new THREE.Mesh(pGeo, pMat);
+                p.position.set(x, y, z);
+                scene.add(p);
+                particles.push({{ mesh: p, life: 1.0 }});
+            }}
+
+            function updateParticles() {{
+                for (let i = particles.length - 1; i >= 0; i--) {{
+                    const p = particles[i];
+                    p.life -= 0.04;
+                    p.mesh.scale.multiplyScalar(1.05);
+                    p.mesh.material.opacity = p.life;
+                    if (p.life <= 0) {{
+                        scene.remove(p.mesh);
+                        particles.splice(i, 1);
+                    }}
+                }}
+            }}
+
+            // Track Coordinates Sampling
             const trackPoints = trackCurve.getSpacedPoints(200);
-
             function getClosestTrackPoint(pos) {{
                 let minDistance = Infinity;
                 let closestPt = trackPoints[0];
@@ -255,19 +334,18 @@ with tab_arena:
                 return {{ point: closestPt, distance: minDistance }};
             }}
 
-            // State Initialization
             const startPt = trackPoints[0];
             const p1State = {{ x: startPt.x - 2, z: startPt.z, angle: 0, speed: 0, lap: 0, crossed: false }};
             const p2State = {{ x: startPt.x + 2, z: startPt.z, angle: 0, speed: 0, lap: 0, progressIdx: 0 }};
-            const maxSpeed = 0.28 + ({speed_lvl} * 0.10);
+            const baseMaxSpeed = 0.28 + ({speed_lvl} * 0.10);
             const isCPU = {"true" if is_cpu else "false"};
 
             let raceStarted = false;
             let startTime = 0;
             let elapsedTime = 0;
-            let timerInterval = null;
 
             function startRace() {{
+                initAudio();
                 document.getElementById('start-btn').style.display = 'none';
                 let countdown = 3;
                 const statusElem = document.getElementById('game-status');
@@ -278,7 +356,7 @@ with tab_arena:
                         countdown--;
                     }} else {{
                         clearInterval(countInterval);
-                        statusElem.innerText = "🟢 GO! RACE IN PROGRESS!";
+                        statusElem.innerText = "🟢 GO! NITRO ACTIVE!";
                         raceStarted = true;
                         startTime = Date.now();
                     }}
@@ -289,12 +367,14 @@ with tab_arena:
             window.addEventListener('keydown', e => keys[e.key] = true);
             window.addEventListener('keyup', e => keys[e.key] = false);
 
-            // Car Physics & Track Boundary Collision Detection
-            function updatePhysics(carMesh, state, forwardKey, leftKey, rightKey, backKey) {{
+            function updatePhysics(carMesh, state, forwardKey, leftKey, rightKey, backKey, nitroKey) {{
                 if (!raceStarted) return;
 
-                const nextSpeed = keys[forwardKey] ? Math.min(state.speed + 0.012, maxSpeed) :
-                                  keys[backKey] ? Math.max(state.speed - 0.01, -maxSpeed * 0.4) :
+                const isNitro = keys[nitroKey];
+                const currentMax = isNitro ? baseMaxSpeed * 1.4 : baseMaxSpeed;
+
+                const nextSpeed = keys[forwardKey] ? Math.min(state.speed + 0.015, currentMax) :
+                                  keys[backKey] ? Math.max(state.speed - 0.012, -currentMax * 0.4) :
                                   state.speed * 0.95;
 
                 if (keys[leftKey] && Math.abs(state.speed) > 0.01) state.angle += 0.045;
@@ -304,20 +384,29 @@ with tab_arena:
                 const nextZ = state.z + Math.cos(state.angle) * nextSpeed;
                 const testPos = new THREE.Vector3(nextX, 0, nextZ);
 
-                // Check distance from central track spline curve
                 const trackCheck = getClosestTrackPoint(testPos);
-                if (trackCheck.distance <= trackWidth - 1.2) {{ // Keep strictly on track surface
+                if (trackCheck.distance <= trackWidth - 1.2) {{
                     state.x = nextX;
                     state.z = nextZ;
                     state.speed = nextSpeed;
-                }} else {{ // Collided with edge boundary: bounce back and reset speed
-                    state.speed = -state.speed * 0.3;
+                }} else {{
+                    state.speed = -state.speed * 0.3; // Wall bounce
+                    createParticle(state.x, 0.5, state.z, 0xffaa00);
                 }}
 
                 carMesh.position.set(state.x, 0, state.z);
                 carMesh.rotation.y = state.angle;
 
-                // Lap Counter Detection
+                // Nitro & Smoke FX
+                if (isNitro && state.speed > 0.1) {{
+                    createParticle(state.x - Math.sin(state.angle)*1.5, 0.4, state.z - Math.cos(state.angle)*1.5, 0x00d2ff);
+                }} else if (Math.abs(state.speed) > 0.2) {{
+                    if (Math.random() < 0.3) createParticle(state.x, 0.2, state.z, 0x888888);
+                }}
+
+                // Sound Pitch Feedback
+                updateEngineSound(Math.abs(state.speed) / baseMaxSpeed);
+
                 const distToStart = testPos.distanceTo(startPt);
                 if (distToStart < 6) {{
                     if (!state.crossed) {{
@@ -329,36 +418,46 @@ with tab_arena:
                 }}
             }}
 
-            // AI Opponent Autonomous Driving System
+            let botErrorOffset = 0;
+            let mistakeTimer = 0;
+
             function updateAIBot() {{
                 if (!raceStarted) return;
                 
                 const targetPt = trackPoints[p2State.progressIdx];
                 const dx = targetPt.x - p2State.x;
                 const dz = targetPt.z - p2State.z;
-                const targetAngle = Math.atan2(dx, dz);
+                
+                mistakeTimer++;
+                if (mistakeTimer % 120 === 0) botErrorOffset = (Math.random() - 0.5) * 0.3;
 
-                p2State.angle = targetAngle;
-                p2State.speed = maxSpeed * 0.85;
-                p2State.x += Math.sin(p2State.angle) * p2State.speed;
-                p2State.z += Math.cos(p2State.angle) * p2State.speed;
+                const targetAngle = Math.atan2(dx, dz) + botErrorOffset;
+                p2State.angle += (targetAngle - p2State.angle) * 0.1;
+                
+                const botMaxSpeed = baseMaxSpeed * 0.70;
+                p2State.speed = Math.min(p2State.speed + 0.006, botMaxSpeed);
+
+                const nextX = p2State.x + Math.sin(p2State.angle) * p2State.speed;
+                const nextZ = p2State.z + Math.cos(p2State.angle) * p2State.speed;
+                
+                p2State.x = nextX;
+                p2State.z = nextZ;
 
                 car2.position.set(p2State.x, 0, p2State.z);
                 car2.rotation.y = p2State.angle;
 
-                if (new THREE.Vector3(p2State.x, 0, p2State.z).distanceTo(targetPt) < 4) {{
+                if (new THREE.Vector3(p2State.x, 0, p2State.z).distanceTo(targetPt) < 5) {{
                     p2State.progressIdx = (p2State.progressIdx + 1) % trackPoints.length;
                     if (p2State.progressIdx === 0) p2State.lap++;
                 }}
             }}
 
-            // Camera Control
             const camView = "{camera_view}";
             function updateCamera() {{
                 if (camView === "Chase Cam (Behind)") {{
-                    camera.position.x = car1.position.x - Math.sin(p1State.angle) * 14;
-                    camera.position.z = car1.position.z - Math.cos(p1State.angle) * 14;
-                    camera.position.y = car1.position.y + 7;
+                    camera.position.x = car1.position.x - Math.sin(p1State.angle) * 12;
+                    camera.position.z = car1.position.z - Math.cos(p1State.angle) * 12;
+                    camera.position.y = car1.position.y + 6;
                     camera.lookAt(car1.position.x, car1.position.y + 1, car1.position.z);
                 }} else if (camView === "Third-Person (High)") {{
                     camera.position.set(0, 50, 50);
@@ -369,16 +468,18 @@ with tab_arena:
                 }}
             }}
 
-            // Main Animation Render Loop
             function animate() {{
                 requestAnimationFrame(animate);
 
-                updatePhysics(car1, p1State, 'w', 'a', 'd', 's');
+                updatePhysics(car1, p1State, 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'ArrowDown', ' ');
+                
                 if (isCPU) {{
                     updateAIBot();
                 }} else {{
-                    updatePhysics(car2, p2State, 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'ArrowDown');
+                    updatePhysics(car2, p2State, 'w', 'a', 'd', 's', 'Shift');
                 }}
+
+                updateParticles();
 
                 if (raceStarted && p1State.lap < 3 && p2State.lap < 3) {{
                     elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -402,18 +503,17 @@ with tab_arena:
         </script>
     </body>
     </html>
-    """
+    \"\"\"
 
-    components.html(threejs_html, height=550)
+    components.html(threejs_html, height=580)
 
-    # Score Submission Section
     st.subheader("🏁 Submit Match Score")
     sc_col1, sc_col2, sc_col3 = st.columns([2, 2, 1])
     
     with sc_col1:
         winner_name = st.selectbox("Race Winner:", [p1_driver, p2_driver], key="winner_drop")
     with sc_col2:
-        finish_sec = st.number_input("Finish Time (Seconds):", min_value=5.0, max_value=300.0, value=22.5, step=0.5)
+        finish_sec = st.number_input("Finish Time (Seconds):", min_value=5.0, max_value=300.0, value=20.0, step=0.5)
     with sc_col3:
         st.write("")
         st.write("")
@@ -439,7 +539,7 @@ with tab_lobbies:
     l_col1, l_col2 = st.columns(2)
 
     with l_col1:
-        new_lobby_name = st.text_input("New Session Name:", placeholder="e.g. Session #103")
+        new_lobby_name = st.text_input("New Session Name:", placeholder="e.g. Night Circuit #103")
         if st.button("Create Open Session"):
             if new_lobby_name.strip():
                 st.session_state.sessions[new_lobby_name.strip()] = {
@@ -477,3 +577,16 @@ with tab_ranks:
         st.dataframe(df_rank.style.highlight_max(axis=0, subset=["Total Points"], color="#2e7d32"), use_container_width=True)
     else:
         st.info("No recorded match results yet. Complete a race in the Arena to post scores!")
+"""
+
+req_code = """streamlit>=1.28.0
+pandas>=2.0.0
+"""
+
+with open("app.py", "w") as f:
+    f.write(app_code)
+
+with open("requirements.txt", "w") as f:
+    f.write(req_code)
+
+print("Export Complete! Run 'streamlit run app.py' to launch.")
