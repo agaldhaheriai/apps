@@ -3,6 +3,7 @@
 app_code = """import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as components
+import json
 
 # Page Configuration
 st.set_page_config(
@@ -47,79 +48,88 @@ st.markdown(\"\"\"
 \"\"\", unsafe_allow_html=True)
 
 # State Management
+if "registered_users" not in st.session_state:
+    st.session_state.registered_users = ["ProRacer", "DriftKing", "TurboMax"]
+
+if "leaderboard" not in st.session_state:
+    st.session_state.leaderboard = {
+        "ProRacer": {"Wins": 3, "Total Points": 450, "Fastest Time (s)": 18.4, "Races": 3},
+        "DriftKing": {"Wins": 1, "Total Points": 150, "Fastest Time (s)": 21.2, "Races": 2}
+    }
+
+if "current_user" not in st.session_state:
+    st.session_state.current_user = "ProRacer"
+
 if "sessions" not in st.session_state:
     st.session_state.sessions = {
         "Session #101 (Night Track)": {"host": "ProRacer", "players": ["ProRacer"], "max": 2, "status": "Waiting"},
         "Session #102 (Circuit)": {"host": "DriftKing", "players": ["DriftKing"], "max": 2, "status": "Waiting"}
     }
 
-if "registered_users" not in st.session_state:
-    st.session_state.registered_users = ["ProRacer", "DriftKing", "TurboMax"]
-
-if "leaderboard" not in st.session_state:
-    st.session_state.leaderboard = {}
-
-if "current_user" not in st.session_state:
-    st.session_state.current_user = "Racer1"
-
-def record_win(winner, time_sec, speed_lvl):
+def record_race_results(winner, loser, winner_time, speed_lvl):
+    # Winner Record
     if winner not in st.session_state.leaderboard:
-        st.session_state.leaderboard[winner] = {
-            "Wins": 0, "Total Points": 0, "Fastest Time (s)": 999.0, "Races": 0
-        }
-    entry = st.session_state.leaderboard[winner]
-    entry["Wins"] += 1
-    entry["Total Points"] += 150 * speed_lvl
-    entry["Races"] += 1
-    if time_sec < entry["Fastest Time (s)"]:
-        entry["Fastest Time (s)"] = round(time_sec, 2)
+        st.session_state.leaderboard[winner] = {"Wins": 0, "Total Points": 0, "Fastest Time (s)": 999.0, "Races": 0}
+    w_entry = st.session_state.leaderboard[winner]
+    w_entry["Wins"] += 1
+    w_entry["Total Points"] += 150 * speed_lvl
+    w_entry["Races"] += 1
+    if winner_time < w_entry["Fastest Time (s)"]:
+        w_entry["Fastest Time (s)"] = round(winner_time, 2)
 
-st.title("🏎️ 3D Low-Poly Racing Engine")
-st.caption("Arrow Keys: Steering & Throttle | Spacebar: Nitro Boost | WebAudio Engine Revs & Particle FX")
+    # Loser Record
+    if loser not in st.session_state.leaderboard:
+        st.session_state.leaderboard[loser] = {"Wins": 0, "Total Points": 0, "Fastest Time (s)": 999.0, "Races": 0}
+    l_entry = st.session_state.leaderboard[loser]
+    l_entry["Total Points"] += 50 * speed_lvl
+    l_entry["Races"] += 1
 
-tab_player, tab_arena, tab_lobbies, tab_ranks = st.tabs([
-    "👤 Player Setup", "🏁 Immersive 3D Arena", "🌐 Game Lobbies", "🏆 Leaderboard"
+st.title("🏎️ 3D Turbo Racing League")
+st.caption("Arrow Keys: Steering & Throttle | Spacebar: Nitro Boost | WebAudio Engine & Live Leaderboards")
+
+tab_player, tab_arena, tab_ranks, tab_lobbies = st.tabs([
+    "👤 Player Setup", "🏁 3D Race Arena", "🏆 Live Leaderboard", "🌐 Game Lobbies"
 ])
 
-# --- TAB 1: PLAYER REGISTRATION ---
+# --- TAB 1: PLAYER SETUP ---
 with tab_player:
-    st.subheader("Register / Select Player Name")
+    st.subheader("Register or Select Active Driver Profile")
     col_a, col_b = st.columns(2)
     
     with col_a:
-        new_name = st.text_input("Enter New Player Name:", placeholder="e.g. SpeedDemon99")
+        new_name = st.text_input("Create Driver Profile:", placeholder="e.g. ApexPredator")
         if st.button("Save & Select Name"):
             if new_name.strip():
                 clean_name = new_name.strip()
                 if clean_name not in st.session_state.registered_users:
                     st.session_state.registered_users.append(clean_name)
                 st.session_state.current_user = clean_name
-                st.success(f"Driver profile updated to: **{clean_name}**")
+                st.success(f"Active Profile Set To: **{clean_name}**")
             else:
-                st.warning("Please enter a valid player name.")
+                st.warning("Please enter a valid name.")
 
     with col_b:
         selected_profile = st.selectbox(
-            "Select Existing Player Profile:",
+            "Select Existing Driver Profile:",
             st.session_state.registered_users,
             index=0 if st.session_state.current_user not in st.session_state.registered_users 
             else st.session_state.registered_users.index(st.session_state.current_user)
         )
         if st.button("Switch Profile"):
             st.session_state.current_user = selected_profile
-            st.info(f"Switched driver to: **{selected_profile}**")
+            st.info(f"Switched Driver To: **{selected_profile}**")
 
     st.divider()
     st.markdown(f"**Current Driver Active:** `{st.session_state.current_user}`")
 
-# --- TAB 2: IMMERSIVE 3D ARENA ---
+# --- TAB 2: 3D ARENA ---
 with tab_arena:
     col1, col2, col3, col4, col5 = st.columns([1.2, 1.2, 1, 1, 1.2])
     
     with col1:
         p1_driver = st.text_input("Player 1 (Red Car):", value=st.session_state.current_user, key="p1_val")
     with col2:
-        p2_input = st.text_input("Player 2 (Leave blank for AI Bot):", value="", key="p2_val", placeholder="AI Bot (Auto-Drive)")
+        p2_input = st.text_input("Player 2 (Leave blank for AI):", value="", key="p2_val", placeholder="AI Bot (Auto-Drive)")
         p2_driver = p2_input.strip() if p2_input.strip() else "CPU_Bot (AI)"
         is_cpu = not bool(p2_input.strip())
     with col3:
@@ -129,12 +139,7 @@ with tab_arena:
     with col5:
         camera_view = st.selectbox("3D Camera:", ["Chase Cam (Behind)", "Third-Person (High)", "Top-Down (Map)"])
 
-    st.markdown(
-        f"**🎮 Mode:** {'**Player vs AI Bot**' if is_cpu else '**2-Player Local**'} | "
-        "**Controls:** **P1:** `Up` (Gas), `Left`/`Right` (Steer), `Down` (Brake/Reverse), `Space` (Nitro Boost)"
-    )
-
-    # Immersive Three.js Engine
+    # Three.js Game Engine with WebAudio and Automatic End Messages
     threejs_html = f\"\"\"
     <!DOCTYPE html>
     <html>
@@ -154,40 +159,120 @@ with tab_arena:
                 box-shadow: 0 0 25px rgba(255,0,85,0.6); z-index: 20; transition: all 0.2s;
             }}
             #start-btn:hover {{ transform: translate(-50%, -50%) scale(1.05); }}
+            #end-modal {{
+                display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                width: 80%; max-width: 500px; background: rgba(15, 18, 30, 0.95); border: 2px solid #00ffcc;
+                border-radius: 16px; padding: 24px; text-align: center; color: white; z-index: 30;
+                box-shadow: 0 0 35px rgba(0, 255, 204, 0.4); backdrop-filter: blur(8px);
+            }}
+            .winner-box {{ background: rgba(0, 255, 150, 0.15); border: 1px solid #00ff99; padding: 15px; border-radius: 10px; margin-bottom: 12px; }}
+            .loser-box {{ background: rgba(255, 50, 80, 0.15); border: 1px solid #ff3250; padding: 15px; border-radius: 10px; }}
             canvas {{ display: block; width: 100vw; height: 550px; }}
         </style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     </head>
     <body>
-        <button id="start-btn" onclick="startRace()">🏁 START RACE</button>
+        <button id="start-btn" onclick="startRace()">🔊 START RACE</button>
         <div id="hud">
-            🏎️ Level {level_choice} Track | Engine Power: {speed_lvl}<br>
+            🏎️ Track Level {level_choice} | Power Level: {speed_lvl}<br>
             ⏱️ Time: <span id="timer-display" style="color:#00ffcc;">0.0s</span><br>
             <span id="p1-hud" style="color: #ff4444;">{p1_driver}: Lap 0/3</span> | 
             <span id="p2-hud" style="color: #4488ff;">{p2_driver}: Lap 0/3</span><br>
-            <span id="game-status" style="color: #ffcc00;">Click START RACE to enable Audio & Ignition!</span>
+            <span id="game-status" style="color: #ffcc00;">Click START RACE to ignite engine!</span>
         </div>
+
+        <div id="end-modal">
+            <div class="winner-box">
+                <h2 style="margin:0 0 8px 0; color:#00ff99;">🏆 CONGRATULATIONS!</h2>
+                <div id="winner-text" style="font-size:18px; font-weight:bold;"></div>
+            </div>
+            <div class="loser-box">
+                <h3 style="margin:0 0 6px 0; color:#ff5577;">💔 HARD LUCK!</h3>
+                <div id="loser-text" style="font-size:15px;"></div>
+            </div>
+        </div>
+
         <script>
-            // Audio Engine using Web Audio API
-            let audioCtx, osc, gainNode;
+            let audioCtx, engineOsc1, engineOsc2, engineGain, squealGain, squealOsc, nitroGain, nitroNoise;
+
             function initAudio() {{
-                if (!audioCtx) {{
-                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                    osc = audioCtx.createOscillator();
-                    gainNode = audioCtx.createGain();
-                    osc.type = 'sawtooth';
-                    osc.frequency.setValueAtTime(60, audioCtx.currentTime);
-                    gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime);
-                    osc.connect(gainNode);
-                    gainNode.connect(audioCtx.destination);
-                    osc.start();
+                if (audioCtx) return;
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+                engineOsc1 = audioCtx.createOscillator();
+                engineOsc2 = audioCtx.createOscillator();
+                engineGain = audioCtx.createGain();
+
+                engineOsc1.type = 'sawtooth';
+                engineOsc2.type = 'triangle';
+                
+                engineOsc1.frequency.setValueAtTime(45, audioCtx.currentTime);
+                engineOsc2.frequency.setValueAtTime(22.5, audioCtx.currentTime);
+                engineGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+
+                engineOsc1.connect(engineGain);
+                engineOsc2.connect(engineGain);
+                engineGain.connect(audioCtx.destination);
+
+                engineOsc1.start();
+                engineOsc2.start();
+
+                squealOsc = audioCtx.createOscillator();
+                squealGain = audioCtx.createGain();
+                squealOsc.type = 'sine';
+                squealOsc.frequency.setValueAtTime(850, audioCtx.currentTime);
+                squealGain.gain.setValueAtTime(0.0, audioCtx.currentTime);
+
+                squealOsc.connect(squealGain);
+                squealGain.connect(audioCtx.destination);
+                squealOsc.start();
+
+                const bufferSize = audioCtx.sampleRate * 2;
+                const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {{
+                    output[i] = Math.random() * 2 - 1;
                 }}
+
+                nitroNoise = audioCtx.createBufferSource();
+                nitroNoise.buffer = noiseBuffer;
+                nitroNoise.loop = true;
+
+                nitroGain = audioCtx.createGain();
+                nitroGain.gain.setValueAtTime(0.0, audioCtx.currentTime);
+
+                nitroNoise.connect(nitroGain);
+                nitroGain.connect(audioCtx.destination);
+                nitroNoise.start();
             }}
-            function updateEngineSound(speedRatio) {{
-                if (audioCtx && osc) {{
-                    const pitch = 60 + (speedRatio * 220);
-                    osc.frequency.setTargetAtTime(pitch, audioCtx.currentTime, 0.05);
-                }}
+
+            function playCrashSound() {{
+                if (!audioCtx) return;
+                const crashOsc = audioCtx.createOscillator();
+                const crashGain = audioCtx.createGain();
+                crashOsc.type = 'square';
+                crashOsc.frequency.setValueAtTime(100, audioCtx.currentTime);
+                crashOsc.frequency.exponentialRampToValueAtTime(20, audioCtx.currentTime + 0.2);
+                crashGain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                crashGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+
+                crashOsc.connect(crashGain);
+                crashGain.connect(audioCtx.destination);
+                crashOsc.start();
+                crashOsc.stop(audioCtx.currentTime + 0.2);
+            }}
+
+            function updateAudio(speedRatio, isTurning, isNitro) {{
+                if (!audioCtx) return;
+                const baseFreq = 45 + (speedRatio * 260);
+                engineOsc1.frequency.setTargetAtTime(baseFreq, audioCtx.currentTime, 0.05);
+                engineOsc2.frequency.setTargetAtTime(baseFreq * 0.5, audioCtx.currentTime, 0.05);
+
+                const targetSqueal = (isTurning && speedRatio > 0.3) ? 0.08 : 0.0;
+                squealGain.gain.setTargetAtTime(targetSqueal, audioCtx.currentTime, 0.05);
+
+                const targetNitro = isNitro ? 0.15 : 0.0;
+                nitroGain.gain.setTargetAtTime(targetNitro, audioCtx.currentTime, 0.05);
             }}
 
             // Three.js Scene Setup
@@ -199,10 +284,8 @@ with tab_arena:
             const renderer = new THREE.WebGLRenderer({{ antialias: true }});
             renderer.setSize(window.innerWidth, 550);
             renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             document.body.appendChild(renderer.domElement);
 
-            // Lighting Setup
             const ambientLight = new THREE.AmbientLight(0x222233, 0.8);
             scene.add(ambientLight);
             
@@ -211,7 +294,6 @@ with tab_arena:
             dirLight.castShadow = true;
             scene.add(dirLight);
 
-            // Ground Track Base
             const groundGeo = new THREE.PlaneGeometry(300, 300);
             const groundMat = new THREE.MeshStandardMaterial({{ color: 0x081008, roughness: 0.9 }});
             const ground = new THREE.Mesh(groundGeo, groundMat);
@@ -219,7 +301,6 @@ with tab_arena:
             ground.receiveShadow = true;
             scene.add(ground);
 
-            // Level Track Generation
             const level = {level_choice};
             let trackCurve;
             const trackWidth = 8;
@@ -247,17 +328,14 @@ with tab_arena:
             }}
 
             const trackGeo = new THREE.TubeGeometry(trackCurve, 150, trackWidth, 8, true);
-            const trackMat = new THREE.MeshStandardMaterial({{ color: 0x222228, roughness: 0.4, metalness: 0.1 }});
+            const trackMat = new THREE.MeshStandardMaterial({{ color: 0x222228, roughness: 0.4 }});
             const trackMesh = new THREE.Mesh(trackGeo, trackMat);
             trackMesh.scale.set(1, 0.01, 1);
             trackMesh.position.y = 0.02;
             scene.add(trackMesh);
 
-            // Detailed Vehicle Factory
             function createCar(colorHex) {{
                 const carGroup = new THREE.Group();
-                
-                // Chassis
                 const bodyGeo = new THREE.BoxGeometry(2.0, 0.6, 3.8);
                 const bodyMat = new THREE.MeshStandardMaterial({{ color: colorHex, roughness: 0.2, metalness: 0.5 }});
                 const body = new THREE.Mesh(bodyGeo, bodyMat);
@@ -265,28 +343,11 @@ with tab_arena:
                 body.castShadow = true;
                 carGroup.add(body);
 
-                // Cabin
                 const cabinGeo = new THREE.BoxGeometry(1.5, 0.5, 1.8);
-                const cabinMat = new THREE.MeshStandardMaterial({{ color: 0x050505, roughness: 0.1 }});
+                const cabinMat = new THREE.MeshStandardMaterial({{ color: 0x050505 }});
                 const cabin = new THREE.Mesh(cabinGeo, cabinMat);
                 cabin.position.set(0, 0.9, -0.2);
                 carGroup.add(cabin);
-
-                // Headlights
-                const headlightMat = new THREE.MeshBasicMaterial({{ color: 0xffffaa }});
-                const hl1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.15, 0.1), headlightMat);
-                hl1.position.set(-0.7, 0.5, 1.9);
-                const hl2 = hl1.clone();
-                hl2.position.set(0.7, 0.5, 1.9);
-                carGroup.add(hl1);
-                carGroup.add(hl2);
-
-                // Spotlights Beam
-                const spotLight = new THREE.SpotLight(0xffffaa, 2, 25, Math.PI / 6, 0.5);
-                spotLight.position.set(0, 0.6, 1.8);
-                spotLight.target.position.set(0, 0, 10);
-                carGroup.add(spotLight);
-                carGroup.add(spotLight.target);
 
                 scene.add(carGroup);
                 return carGroup;
@@ -295,31 +356,6 @@ with tab_arena:
             const car1 = createCar(0xff2244);
             const car2 = createCar(0x2288ff);
 
-            // Particles System (Tire Smoke & Nitro Flame)
-            const particles = [];
-            function createParticle(x, y, z, colorHex) {{
-                const pGeo = new THREE.SphereGeometry(0.15 + Math.random() * 0.1, 4, 4);
-                const pMat = new THREE.MeshBasicMaterial({{ color: colorHex, transparent: true, opacity: 0.8 }});
-                const p = new THREE.Mesh(pGeo, pMat);
-                p.position.set(x, y, z);
-                scene.add(p);
-                particles.push({{ mesh: p, life: 1.0 }});
-            }}
-
-            function updateParticles() {{
-                for (let i = particles.length - 1; i >= 0; i--) {{
-                    const p = particles[i];
-                    p.life -= 0.04;
-                    p.mesh.scale.multiplyScalar(1.05);
-                    p.mesh.material.opacity = p.life;
-                    if (p.life <= 0) {{
-                        scene.remove(p.mesh);
-                        particles.splice(i, 1);
-                    }}
-                }}
-            }}
-
-            // Track Coordinates Sampling
             const trackPoints = trackCurve.getSpacedPoints(200);
             function getClosestTrackPoint(pos) {{
                 let minDistance = Infinity;
@@ -341,6 +377,7 @@ with tab_arena:
             const isCPU = {"true" if is_cpu else "false"};
 
             let raceStarted = false;
+            let raceEnded = false;
             let startTime = 0;
             let elapsedTime = 0;
 
@@ -356,7 +393,7 @@ with tab_arena:
                         countdown--;
                     }} else {{
                         clearInterval(countInterval);
-                        statusElem.innerText = "🟢 GO! NITRO ACTIVE!";
+                        statusElem.innerText = "🟢 GO! DRIVE FOR THE WIN!";
                         raceStarted = true;
                         startTime = Date.now();
                     }}
@@ -368,7 +405,7 @@ with tab_arena:
             window.addEventListener('keyup', e => keys[e.key] = false);
 
             function updatePhysics(carMesh, state, forwardKey, leftKey, rightKey, backKey, nitroKey) {{
-                if (!raceStarted) return;
+                if (!raceStarted || raceEnded) return;
 
                 const isNitro = keys[nitroKey];
                 const currentMax = isNitro ? baseMaxSpeed * 1.4 : baseMaxSpeed;
@@ -377,6 +414,7 @@ with tab_arena:
                                   keys[backKey] ? Math.max(state.speed - 0.012, -currentMax * 0.4) :
                                   state.speed * 0.95;
 
+                const isTurning = keys[leftKey] || keys[rightKey];
                 if (keys[leftKey] && Math.abs(state.speed) > 0.01) state.angle += 0.045;
                 if (keys[rightKey] && Math.abs(state.speed) > 0.01) state.angle -= 0.045;
 
@@ -390,22 +428,14 @@ with tab_arena:
                     state.z = nextZ;
                     state.speed = nextSpeed;
                 }} else {{
-                    state.speed = -state.speed * 0.3; // Wall bounce
-                    createParticle(state.x, 0.5, state.z, 0xffaa00);
+                    playCrashSound();
+                    state.speed = -state.speed * 0.3;
                 }}
 
                 carMesh.position.set(state.x, 0, state.z);
                 carMesh.rotation.y = state.angle;
 
-                // Nitro & Smoke FX
-                if (isNitro && state.speed > 0.1) {{
-                    createParticle(state.x - Math.sin(state.angle)*1.5, 0.4, state.z - Math.cos(state.angle)*1.5, 0x00d2ff);
-                }} else if (Math.abs(state.speed) > 0.2) {{
-                    if (Math.random() < 0.3) createParticle(state.x, 0.2, state.z, 0x888888);
-                }}
-
-                // Sound Pitch Feedback
-                updateEngineSound(Math.abs(state.speed) / baseMaxSpeed);
+                updateAudio(Math.abs(state.speed) / baseMaxSpeed, isTurning, isNitro);
 
                 const distToStart = testPos.distanceTo(startPt);
                 if (distToStart < 6) {{
@@ -422,7 +452,7 @@ with tab_arena:
             let mistakeTimer = 0;
 
             function updateAIBot() {{
-                if (!raceStarted) return;
+                if (!raceStarted || raceEnded) return;
                 
                 const targetPt = trackPoints[p2State.progressIdx];
                 const dx = targetPt.x - p2State.x;
@@ -437,11 +467,8 @@ with tab_arena:
                 const botMaxSpeed = baseMaxSpeed * 0.70;
                 p2State.speed = Math.min(p2State.speed + 0.006, botMaxSpeed);
 
-                const nextX = p2State.x + Math.sin(p2State.angle) * p2State.speed;
-                const nextZ = p2State.z + Math.cos(p2State.angle) * p2State.speed;
-                
-                p2State.x = nextX;
-                p2State.z = nextZ;
+                p2State.x += Math.sin(p2State.angle) * p2State.speed;
+                p2State.z += Math.cos(p2State.angle) * p2State.speed;
 
                 car2.position.set(p2State.x, 0, p2State.z);
                 car2.rotation.y = p2State.angle;
@@ -450,6 +477,17 @@ with tab_arena:
                     p2State.progressIdx = (p2State.progressIdx + 1) % trackPoints.length;
                     if (p2State.progressIdx === 0) p2State.lap++;
                 }}
+            }}
+
+            function triggerRaceEnd(winner, loser) {{
+                raceEnded = true;
+                raceStarted = false;
+                
+                document.getElementById('game-status').innerText = "🏁 RACE FINISHED!";
+                
+                document.getElementById('winner-text').innerHTML = winner + "<br><span style='color:#fff; font-size:15px;'>Finished in " + elapsedTime + " seconds! Outstanding driving!</span>";
+                document.getElementById('loser-text').innerText = loser + " - Better luck next time! Keep practicing to claim the crown.";
+                document.getElementById('end-modal').style.display = 'block';
             }}
 
             const camView = "{camera_view}";
@@ -479,9 +517,7 @@ with tab_arena:
                     updatePhysics(car2, p2State, 'w', 'a', 'd', 's', 'Shift');
                 }}
 
-                updateParticles();
-
-                if (raceStarted && p1State.lap < 3 && p2State.lap < 3) {{
+                if (raceStarted && !raceEnded) {{
                     elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1);
                     document.getElementById('timer-display').innerText = elapsedTime + "s";
                 }}
@@ -489,10 +525,10 @@ with tab_arena:
                 document.getElementById('p1-hud').innerText = "{p1_driver}: Lap " + Math.min(p1State.lap, 3) + "/3";
                 document.getElementById('p2-hud').innerText = "{p2_driver}: Lap " + Math.min(p2State.lap, 3) + "/3";
 
-                if (p1State.lap >= 3 || p2State.lap >= 3) {{
-                    raceStarted = false;
+                if ((p1State.lap >= 3 || p2State.lap >= 3) && !raceEnded) {{
                     const winner = p1State.lap >= 3 ? "{p1_driver}" : "{p2_driver}";
-                    document.getElementById('game-status').innerText = "🏆 WINNER: " + winner + " (" + elapsedTime + "s)!";
+                    const loser = p1State.lap >= 3 ? "{p2_driver}" : "{p1_driver}";
+                    triggerRaceEnd(winner, loser);
                 }}
 
                 updateCamera();
@@ -507,7 +543,7 @@ with tab_arena:
 
     components.html(threejs_html, height=580)
 
-    st.subheader("🏁 Submit Match Score")
+    st.subheader("🏁 Save Match Result to Leaderboard")
     sc_col1, sc_col2, sc_col3 = st.columns([2, 2, 1])
     
     with sc_col1:
@@ -517,11 +553,34 @@ with tab_arena:
     with sc_col3:
         st.write("")
         st.write("")
-        if st.button("Save Result", use_container_width=True):
-            record_win(winner_name, finish_sec, speed_lvl)
-            st.success(f"Score recorded for {winner_name}!")
+        if st.button("Post Result to Leaderboard", use_container_width=True):
+            loser_name = p2_driver if winner_name == p1_driver else p1_driver
+            record_race_results(winner_name, loser_name, finish_sec, speed_lvl)
+            st.success(f"Score recorded for {winner_name} on the Leaderboard!")
 
-# --- TAB 3: GAME LOBBIES ---
+# --- TAB 3: LEADERBOARD ---
+with tab_ranks:
+    st.subheader("🏆 Global Driver Rankings")
+    
+    if st.session_state.leaderboard:
+        df_rank = pd.DataFrame.from_dict(st.session_state.leaderboard, orient="index")
+        df_rank.index.name = "Driver Name"
+        
+        # Calculate Win Rate
+        df_rank["Win Rate %"] = ((df_rank["Wins"] / df_rank["Races"]) * 100).round(1)
+        
+        # Sort by Total Points and Fastest Time
+        df_rank = df_rank.sort_values(by=["Total Points", "Fastest Time (s)"], ascending=[False, True])
+        
+        st.dataframe(
+            df_rank.style.highlight_max(axis=0, subset=["Total Points", "Wins"], color="#1f5e32")
+                   .highlight_min(axis=0, subset=["Fastest Time (s)"], color="#1f3e5e"),
+            use_container_width=True
+        )
+    else:
+        st.info("No recorded match results yet. Finish a race in the Arena to post scores!")
+
+# --- TAB 4: GAME LOBBIES ---
 with tab_lobbies:
     st.subheader("🌐 Active Open Racing Lobbies")
     lobby_data = []
@@ -539,7 +598,7 @@ with tab_lobbies:
     l_col1, l_col2 = st.columns(2)
 
     with l_col1:
-        new_lobby_name = st.text_input("New Session Name:", placeholder="e.g. Night Circuit #103")
+        new_lobby_name = st.text_input("New Session Name:", placeholder="e.g. Speed Circuit #103")
         if st.button("Create Open Session"):
             if new_lobby_name.strip():
                 st.session_state.sessions[new_lobby_name.strip()] = {
@@ -566,27 +625,17 @@ with tab_lobbies:
                     st.info("You are already in this session.")
             else:
                 st.error("Session is already full!")
-
-# --- TAB 4: LEADERBOARD ---
-with tab_ranks:
-    st.subheader("🏆 Driver Global Rankings")
-    if st.session_state.leaderboard:
-        df_rank = pd.DataFrame.from_dict(st.session_state.leaderboard, orient="index")
-        df_rank.index.name = "Driver Name"
-        df_rank = df_rank.sort_values(by=["Total Points", "Fastest Time (s)"], ascending=[False, True])
-        st.dataframe(df_rank.style.highlight_max(axis=0, subset=["Total Points"], color="#2e7d32"), use_container_width=True)
-    else:
-        st.info("No recorded match results yet. Complete a race in the Arena to post scores!")
 """
 
 req_code = """streamlit>=1.28.0
 pandas>=2.0.0
 """
 
-with open("app.py", "w") as f:
+# Export to gameapp.py and requirements.txt
+with open("gameapp.py", "w") as f:
     f.write(app_code)
 
 with open("requirements.txt", "w") as f:
     f.write(req_code)
 
-print("Export Complete! Run 'streamlit run app.py' to launch.")
+print("Export Complete! 'gameapp.py' and 'requirements.txt' generated successfully.")
