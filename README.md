@@ -29,6 +29,14 @@ Then open <http://localhost:8501>.
 
 ---
 
+## The page
+
+Three things, nothing else: **settings** in the sidebar, the **game**, and the
+**league table**. Invite troubleshooting and league file management live in
+collapsed expanders so they stay out of the way while people are racing.
+
+---
+
 ## Controls
 
 | Action | Keys |
@@ -44,28 +52,36 @@ Then open <http://localhost:8501>.
 
 Click the arena once so it takes keyboard focus.
 
-### Fullscreen
+### Fullscreen — use the Play fullscreen button
 
-Pressing **START RACE** takes the game fullscreen on desktop, laptop and phone —
-the click is the user gesture browsers require, so it can happen automatically.
-Where the real Fullscreen API is unavailable or blocked (iOS Safari, sandboxed
-iframes), the game expands its frame to fill the page instead, which looks the
-same and needs no permission. **Esc** or **F** returns to the page, and on Android
-it also asks the device to lock to landscape.
+Streamlit renders components inside a **sandboxed iframe**, and browsers refuse
+fullscreen requests from one. No amount of JavaScript gets around that, so the
+app serves the game at its own URL as well:
 
-### On a phone or tablet
+> **▶ PLAY FULLSCREEN** — above the arena. Opens the race on its own page.
 
-Touch devices get a purpose-built layout: steering under the left thumb, a large
-GAS pad plus BRAKE and NITRO under the right, haptic feedback where the device
-supports it. The HUD rearranges for a small screen, page scroll and pinch-zoom are
-locked out while you drive, and shadows and antialiasing switch off automatically
-so the frame rate holds up.
+That page is top-level, so fullscreen works properly on laptop, desktop and
+phone, it takes the whole screen with no Streamlit chrome around it, and on a
+phone you can add it to the home screen and it opens like an app. START puts it
+fullscreen for you; **Esc** or **F** comes back. The inline arena on the
+Streamlit page still plays normally — it just can't go fullscreen.
 
-The landscape hint asks the **device** for its orientation rather than measuring
-the frame — the game sits in a tall, narrow iframe, so measuring the frame made
-the hint appear even when the phone was already sideways, and it covered the
-controls. It now disappears the moment you turn the phone, has a *Race in portrait
-anyway* button, and never shows in fullscreen.
+The play link carries a token, not your settings, so an uploaded soundtrack and
+your room, colours and circuit all come across without a giant URL. Links expire
+after twelve hours; press the button again for a fresh one.
+
+### On a phone — portrait
+
+The game plays **portrait**, the way a phone is actually held. There is no
+"rotate your phone" prompt any more: the camera adapts instead, widening its lens
+and backing off on a narrow screen so the corner ahead still fits. Landscape
+works too; nothing forces either way.
+
+Touch devices get steering under the left thumb, a large GAS pad with BRAKE and
+NITRO under the right, and haptic feedback where supported. The HUD shrinks and
+rearranges around the controls, page scroll and pinch-zoom are locked out while
+you drive, `100dvh` sizing keeps the browser's toolbars from cropping the track,
+and shadows and antialiasing switch off automatically so the frame rate holds.
 
 ---
 
@@ -157,8 +173,11 @@ address and port for you and says which of the above is wrong.
 
 ## Cars, colours and names
 
-Player 1 and Player 2 each choose from twelve paints in the sidebar; the AI takes
-whatever colours are left, so no two cars look alike. Every driver's name floats
+Player 1 and Player 2 each choose from twelve paints in the sidebar, and the
+computer cars are named in the sidebar too — type them comma-separated
+("Ghost Rider, Blue Falcon") and they appear on the grid, on their name plates
+and in the race order. The computer takes whatever colours are left, so no two
+cars look alike. Every driver's name floats
 above their car during the race, scaled by camera distance so it stays readable
 from the chase camera and from the top-down view, and your own car carries a
 coloured ground ring so you can find yourself in a pack.
@@ -240,7 +259,11 @@ join from anywhere.
   the standalone port instead.
 * The "turn your phone sideways" overlay measured the iframe rather than the
   device, so it never went away — and it sat on top of the controls, which made
-  the game unplayable on a phone in landscape.
+  the game unplayable on a phone. The prompt is gone entirely and the game plays
+  portrait.
+* Fullscreen could never work from inside Streamlit's sandboxed component
+  iframe, on any device. The game is now also served as its own page, where it
+  can.
 
 ---
 

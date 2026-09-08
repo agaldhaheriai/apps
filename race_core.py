@@ -372,6 +372,66 @@ def _rand_id() -> str:
 
 
 # --------------------------------------------------------------------------
+# Standalone play pages
+# --------------------------------------------------------------------------
+class ConfigStore:
+    """Holds race settings so the game can open as its own page.
+
+    Streamlit embeds components in a sandboxed iframe, which blocks the
+    Fullscreen API outright. Serving the game at its own URL sidesteps that
+    entirely: a top-level page can go fullscreen, lock orientation and use the
+    whole screen. The Streamlit page hands settings over by token rather than
+    stuffing them (including an uploaded soundtrack) into the URL.
+    """
+
+    def __init__(self, ttl: float = 12 * 3600, limit: int = 200):
+        self.ttl = ttl
+        self.limit = limit
+        self._lock = threading.Lock()
+        self._items: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+    def put(self, cfg: Dict[str, Any], token: Optional[str] = None) -> str:
+        token = token or _rand_id()
+        with self._lock:
+            self._items[token] = (time.time(), dict(cfg))
+            self._prune()
+        return token
+
+    def get(self, token: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            item = self._items.get(str(token))
+            return dict(item[1]) if item else None
+
+    def _prune(self) -> None:
+        now = time.time()
+        for k in [k for k, (t, _) in self._items.items() if now - t > self.ttl]:
+            self._items.pop(k, None)
+        while len(self._items) > self.limit:
+            oldest = min(self._items, key=lambda k: self._items[k][0])
+            self._items.pop(oldest, None)
+
+
+def render_play_page(configs: "ConfigStore", query: Dict[str, str]) -> Tuple[int, str, bytes]:
+    """Full HTML document for the standalone player."""
+    try:
+        from game_html import build_game_html
+    except Exception:
+        return 500, "text/plain", b"game_html module not importable"
+    cfg = configs.get(query.get("c", "")) or {}
+    if not cfg:
+        return 404, "text/html", (
+            "<!doctype html><meta charset=utf-8><style>body{background:#070c18;"
+            "color:#e8eefc;font-family:system-ui;display:flex;height:100vh;margin:0;"
+            "align-items:center;justify-content:center;text-align:center}</style>"
+            "<div><h2>This race link has expired</h2>"
+            "<p>Go back to the app and press <b>Play fullscreen</b> again.</p></div>"
+        ).encode("utf-8")
+    cfg = dict(cfg)
+    cfg["standalone"] = True
+    return 200, "text/html", build_game_html(cfg).encode("utf-8")
+
+
+# --------------------------------------------------------------------------
 # Request handling (shared by the standalone server and the Streamlit mount)
 # --------------------------------------------------------------------------
 def handle_request(board: "Leaderboard", rooms: "RoomManager", method: str,
@@ -411,9 +471,10 @@ def handle_request(board: "Leaderboard", rooms: "RoomManager", method: str,
 # Standalone HTTP API (fallback when the Streamlit mount is unavailable)
 # --------------------------------------------------------------------------
 class _Handler(BaseHTTPRequestHandler):
-    server_version = "TurboRacing/3.0"
+    server_version = "TurboRacing/4.0"
     board: "Leaderboard"
     rooms: "RoomManager"
+    configs: "ConfigStore"
 
     def log_message(self, fmt, *args):            # keep Streamlit's console readable
         pass
@@ -446,6 +507,15 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if u.path.rstrip("/").endswith("/play"):
+            status, ctype, body = render_play_page(self.configs, q)
+            self.send_response(status)
+            self.send_header("Content-Type", ctype + "; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         status, payload = handle_request(self.board, self.rooms, "GET", u.path, q, {})
         self._send(payload, status)
 
@@ -459,8 +529,10 @@ class GameServer:
     """Background API server. One per Streamlit process."""
 
     def __init__(self, board: Leaderboard, rooms: RoomManager, port: int = 0,
-                 host: str = "0.0.0.0"):
-        handler = type("Handler", (_Handler,), {"board": board, "rooms": rooms})
+                 host: str = "0.0.0.0", configs: Optional["ConfigStore"] = None):
+        self.configs = configs or ConfigStore()
+        handler = type("Handler", (_Handler,), {"board": board, "rooms": rooms,
+                                                "configs": self.configs})
         self.httpd = ThreadingHTTPServer((host, port), handler)
         self.httpd.daemon_threads = True
         self.port = self.httpd.server_address[1]
@@ -492,7 +564,8 @@ API_PREFIX = "/racing/api"
 
 
 def attach_to_streamlit(board: Leaderboard, rooms: RoomManager,
-                        prefix: str = API_PREFIX) -> bool:
+                        prefix: str = API_PREFIX,
+                        configs: Optional["ConfigStore"] = None) -> bool:
     """Add the racing API to the Tornado app Streamlit is already running.
 
     Best-effort by design: this reaches into another library's internals, so
@@ -500,12 +573,13 @@ def attach_to_streamlit(board: Leaderboard, rooms: RoomManager,
     standalone API port. It must never take the app down with it.
     """
     try:
-        return _attach_to_streamlit(board, rooms, prefix)
+        return _attach_to_streamlit(board, rooms, prefix, configs)
     except Exception:
         return False
 
 
-def _attach_to_streamlit(board: Leaderboard, rooms: RoomManager, prefix: str) -> bool:
+def _attach_to_streamlit(board: Leaderboard, rooms: RoomManager, prefix: str,
+                         configs: Optional["ConfigStore"] = None) -> bool:
     try:
         import gc
 
@@ -566,11 +640,34 @@ def _attach_to_streamlit(board: Leaderboard, rooms: RoomManager, prefix: str) ->
         def post(self, endpoint):
             self._run("POST", endpoint)
 
-    spec = (prefix.rstrip("/") + r"/(\w+)", RacingHandler, {"board": board, "rooms": rooms})
+    class PlayHandler(tornado.web.RequestHandler):  # type: ignore[misc]
+        def initialize(self, configs):
+            self.configs = configs
+
+        def check_xsrf_cookie(self):
+            return
+
+        def get(self):
+            query = {}
+            for k, v in self.request.query_arguments.items():
+                key = k.decode() if isinstance(k, bytes) else k
+                val = v[0] if v else b""
+                query[key] = val.decode() if isinstance(val, bytes) else str(val)
+            status, ctype, body = render_play_page(self.configs, query)
+            self.set_status(status)
+            self.set_header("Content-Type", ctype + "; charset=utf-8")
+            self.set_header("Cache-Control", "no-store")
+            self.finish(body)
+
+    root = prefix.rstrip("/").rsplit("/", 1)[0] or "/racing"
+    specs = [
+        (prefix.rstrip("/") + r"/(\w+)", RacingHandler, {"board": board, "rooms": rooms}),
+        (root + r"/play", PlayHandler, {"configs": configs or ConfigStore()}),
+    ]
     ok = False
     for app in apps:
         try:
-            app.add_handlers(r".*$", [spec])
+            app.add_handlers(r".*$", specs)
             ok = True
         except Exception:
             continue

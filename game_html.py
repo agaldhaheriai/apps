@@ -30,6 +30,7 @@ DEFAULT_CFG: Dict[str, Any] = {
     "track": 1,
     "aiCount": 3,
     "aiSkill": 0.82,
+    "aiNames": None,      # names for the computer cars
     "volume": 0.8,
     "quality": "high",
     "camera": "chase",
@@ -54,14 +55,16 @@ GAME_CSS = """
   --accent:#38bdf8; --good:#34d399; --warn:#fbbf24; --bad:#f87171;
 }
 *{box-sizing:border-box}
-html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#05070f;
+html,body{margin:0;padding:0;height:100%;height:100dvh;overflow:hidden;background:#05070f;
+  overscroll-behavior:none;-webkit-text-size-adjust:100%;
   font-family:'Barlow','Segoe UI',system-ui,-apple-system,Roboto,sans-serif;color:var(--ink)}
 .num,#h-time,#h-lap,#h-pos,#h-best,#sp-val,#toast,.code{
   font-family:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
   font-variant-numeric:tabular-nums}
 h1,h2,h4,#toast,.btn,#tools button{font-family:'Barlow Condensed','Barlow',sans-serif;
   text-transform:uppercase;letter-spacing:.06em}
-#wrap{position:relative;width:100%;height:100vh;overflow:hidden;background:#05070f}
+#wrap{position:relative;width:100%;height:100vh;height:100dvh;overflow:hidden;
+  background:#05070f}
 canvas#scene{display:block;width:100%;height:100%}
 .panel{position:absolute;background:var(--panel);border:1px solid var(--line);
   border-radius:12px;backdrop-filter:blur(8px);box-shadow:0 8px 30px rgba(0,0,0,.45)}
@@ -156,11 +159,6 @@ table.res tr.me td{background:rgba(56,189,248,.14);color:#fff;font-weight:700}
 .tbtn.gas.on{background:rgba(52,211,153,.62)}
 .tbtn.small{width:70px;height:52px;font-size:12px}
 .tbtn.nitro{background:rgba(168,85,247,.3);border-color:rgba(216,180,254,.6)}
-#rotate{position:absolute;inset:0;z-index:30;display:none;align-items:center;
-  justify-content:center;flex-direction:column;gap:10px;text-align:center;
-  background:rgba(5,7,15,.94);font-size:15px;font-weight:700;padding:24px}
-#rotate span{font-size:44px}
-#rotate .btn{font-size:13px;padding:9px 18px;margin-top:6px}
 body.bigframe #wrap{position:fixed;inset:0;width:100vw;height:100vh}
 
 @media (max-width:820px){
@@ -181,6 +179,29 @@ body.bigframe #wrap{position:fixed;inset:0;width:100vw;height:100vh}
 }
 body.touch #speedo{bottom:auto}
 body.touch .keys{display:none}
+
+/* ---- portrait phone: the default way people hold a phone ---- */
+@media (orientation:portrait) and (max-width:820px){
+  #hud{top:8px;left:8px;min-width:118px;padding:5px 8px}
+  #hud .big{font-size:17px}
+  #speedo{top:8px;right:8px;left:auto;bottom:auto;width:96px;padding:6px 8px}
+  #speedo .val{font-size:19px}
+  #speedo .unit{font-size:9px;letter-spacing:1px}
+  #minimap{top:78px;right:8px;bottom:auto;padding:4px}
+  #minimap canvas{width:74px;height:74px}
+  #tools{top:auto;bottom:150px;transform:translateX(-50%) scale(.8)}
+  #netchip{transform:translate(-50%,34px) scale(.85)}
+  #toast{font-size:34px}
+  #touchpad{padding-bottom:calc(18px + env(safe-area-inset-bottom))}
+  .tbtn.steer{width:80px;height:80px}
+  .tbtn.gas{width:88px;height:88px}
+  .tbtn.small{width:62px;height:46px;font-size:11px}
+  .tside.right{flex-wrap:wrap;justify-content:flex-end;max-width:170px;gap:8px}
+  .card{padding:16px 14px}
+  .card h1{font-size:18px}
+  .card p{font-size:12px}
+  .btn{padding:14px 22px;font-size:15px}
+}
 """
 
 GAME_JS = r"""
@@ -536,11 +557,18 @@ GAME_JS = r"""
   var camera = new THREE.PerspectiveCamera(58, 1, 0.5, 900);
   camera.position.set(0, 60, 40);
 
+  var viewPull = 1;          // how far the camera backs off on narrow screens
   function resize() {
     var w = wrap.clientWidth || window.innerWidth;
     var h = wrap.clientHeight || window.innerHeight;
     renderer.setSize(w, h, false);
-    camera.aspect = w / Math.max(1, h);
+    var aspect = w / Math.max(1, h);
+    camera.aspect = aspect;
+    // A portrait phone is narrow: widen the lens a little and pull the camera
+    // back so the corner ahead still fits on screen.
+    var narrow = aspect < 1 ? (1 - aspect) : 0;      // 0 = square, ~0.55 on a phone
+    camera.fov = Math.min(78, 58 * (1 + narrow * 0.55));
+    viewPull = Math.min(1.7, 1 + narrow * 0.85);
     camera.updateProjectionMatrix();
   }
   window.addEventListener('resize', resize);
@@ -902,7 +930,9 @@ GAME_JS = r"""
   }
 
   var PALETTE = [0xef4444, 0x3b82f6, 0x22c55e, 0xf59e0b, 0xa855f7, 0x06b6d4, 0xec4899, 0x84cc16];
-  var AI_NAMES = ['Vortex', 'Blaze', 'Nova', 'Rogue', 'Falcon', 'Titan', 'Zephyr'];
+  var AI_NAMES = (CFG.aiNames && CFG.aiNames.length)
+    ? CFG.aiNames
+    : ['Vortex', 'Blaze', 'Nova', 'Rogue', 'Falcon', 'Titan', 'Zephyr'];
 
   function gridPose(slot) {
     // Grid boxes sit just past the line so the first crossing = lap 1 done.
@@ -986,27 +1016,9 @@ GAME_JS = r"""
 
   // The game runs in a fixed-height iframe, so the frame is portrait-shaped even
   // when the phone is not. Ask the device about its orientation instead.
-  var rotateDismissed = false;
-  function devicePortrait() {
-    try {
-      var t = window.screen && window.screen.orientation && window.screen.orientation.type;
-      if (t) return t.indexOf('portrait') === 0;
-    } catch (e) { /* not supported */ }
-    if (typeof window.orientation === 'number') return Math.abs(window.orientation) !== 90;
-    try {
-      if (window.top && window.top !== window) {
-        return window.top.innerHeight > window.top.innerWidth;
-      }
-    } catch (e) { /* cross-origin parent */ }
-    return window.innerHeight > window.innerWidth;
-  }
-  function orient() {
-    var el = $('rotate');
-    if (!el) return;
-    var show = IS_TOUCH && devicePortrait() && !rotateDismissed && !isFullscreen();
-    el.style.display = show ? 'flex' : 'none';
-    resize();
-  }
+  // The game plays in whatever orientation the phone is already in — portrait
+  // included — so there is no rotate prompt. The camera adapts instead.
+  function orient() { resize(); }
 
   // Touch controls for phones joining via the QR code: steering under the left
   // thumb, throttle and nitro under the right, sized for real thumbs.
@@ -1048,13 +1060,7 @@ GAME_JS = r"""
       if (e.target.closest && e.target.closest('#touchpad')) e.preventDefault();
     }, { passive: false });
 
-    window.addEventListener('resize', orient);
     window.addEventListener('orientationchange', function () { setTimeout(orient, 300); });
-    $('rotate-skip').addEventListener('click', function () {
-      rotateDismissed = true;
-      orient();
-    });
-    orient();
   }
   bindTouch();
 
@@ -1254,13 +1260,15 @@ GAME_JS = r"""
     var r = me;
     var desired = new THREE.Vector3();
     if (camMode === 'top') {
-      desired.set(r.x, 70, r.z + 0.01);
+      desired.set(r.x, 70 * viewPull, r.z + 0.01);
       camTarget.set(r.x, 0, r.z);
     } else if (camMode === 'chase') {
-      desired.set(r.x - Math.sin(r.angle) * 13, 7.5, r.z - Math.cos(r.angle) * 13);
+      var d = 13 * viewPull;
+      desired.set(r.x - Math.sin(r.angle) * d, 7.5 * viewPull, r.z - Math.cos(r.angle) * d);
       camTarget.set(r.x + Math.sin(r.angle) * 8, 1.6, r.z + Math.cos(r.angle) * 8);
     } else {
-      desired.set(r.x - Math.sin(r.angle) * 22, 20, r.z - Math.cos(r.angle) * 22);
+      desired.set(r.x - Math.sin(r.angle) * 22 * viewPull, 20 * viewPull,
+        r.z - Math.cos(r.angle) * 22 * viewPull);
       camTarget.set(r.x, 1, r.z);
     }
     var k = 1 - Math.pow(0.0016, dt);
@@ -1646,13 +1654,14 @@ GAME_JS = r"""
     } catch (e) { /* cross-origin parent — theatre mode covers it */ }
   }
 
-  function lockLandscape() {
+  function lockOrientation() {
     if (!IS_TOUCH) return;
     try {
       if (screen.orientation && screen.orientation.lock) {
-        screen.orientation.lock('landscape').catch(function () {});
+        // Portrait: phones are held this way, and the camera is set up for it.
+        screen.orientation.lock('portrait').catch(function () {});
       }
-    } catch (e) { /* iOS and desktop don't allow this; the hint covers it */ }
+    } catch (e) { /* iOS doesn't allow this — the layout works either way */ }
     setTimeout(orient, 300);
   }
 
@@ -1699,7 +1708,7 @@ GAME_JS = r"""
     allowFrameFullscreen();
     var el = document.documentElement;
     var req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
-    var done = function () { lockLandscape(); setTimeout(resize, 150); orient(); };
+    var done = function () { lockOrientation(); setTimeout(resize, 150); orient(); };
     if (!req) { enterTheatre(); done(); return; }
     var p;
     try { p = req.call(el); } catch (e) { p = null; }
@@ -1924,6 +1933,7 @@ GAME_JS = r"""
     autopilot: function (on) { state.autopilot = !!on; },
     remotes: remotes, net: function () { return NET; },
     apiBase: function () { return API_BASE; },
+    camera: function () { return camera; },
     reset: resetRace
   };
   requestAnimationFrame(frame);
@@ -1966,10 +1976,6 @@ def _body_html(cfg: Dict[str, Any]) -> str:
   <div id="minimap" class="panel"><canvas id="mini" width="150" height="150"></canvas></div>
 
   <div id="netchip"></div>
-  <div id="rotate"><span>📱↻</span><b>Turn your phone sideways</b>
-    <div style="color:#9fb3d9;font-weight:400;max-width:320px">Landscape gives you the
-    whole track and both thumbs on the controls.</div>
-    <button class="btn" id="rotate-skip">Race in portrait anyway</button></div>
   <div id="toast"></div>
   <div id="msg"></div>
 
@@ -2031,7 +2037,14 @@ if (typeof THREE === 'undefined') {
 </script>""" % json.dumps(THREE_SOURCES[1:])
     return (
         "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1,"
+        "maximum-scale=1,user-scalable=no,viewport-fit=cover'>"
+        # Treated as an app when added to a phone's home screen, and the status
+        # bar blends into the game instead of framing it.
+        "<meta name='apple-mobile-web-app-capable' content='yes'>"
+        "<meta name='mobile-web-app-capable' content='yes'>"
+        "<meta name='apple-mobile-web-app-status-bar-style' content='black-translucent'>"
+        "<meta name='theme-color' content='#05070f'>"
         "<title>Turbo Racing League</title>"
         "%s<style>%s</style>%s%s</head><body>%s"
         "<script>window.__RACE_CFG__ = %s;</script>"
