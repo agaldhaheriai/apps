@@ -4,10 +4,26 @@ A 3D top-down/chase arcade racer that runs inside Streamlit. Rebuilt from
 `gameapp.py` with a real circuit, synthesised sound, a start/finish gantry,
 QR-code multiplayer rooms and a player database saved as JSON.
 
+### One file (recommended for deployment)
+
 ```bash
 pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+`streamlit_app.py` has everything bundled inside it — upload that one file plus
+`requirements.txt` and there is nothing that can fall out of step. This is the
+one to use on Streamlit Community Cloud.
+
+### Source layout (for editing)
+
+```bash
 streamlit run app.py
 ```
+
+`app.py`, `race_core.py` and `game_html.py` are a matched set — if you deploy
+these, deploy **all three together**. After editing them, run
+`python3 build_single_file.py` to refresh `streamlit_app.py`.
 
 Then open <http://localhost:8501>.
 
@@ -17,6 +33,8 @@ Then open <http://localhost:8501>.
 
 | File | What it does |
 |---|---|
+| `streamlit_app.py` | Generated single-file build — the one to deploy |
+| `build_single_file.py` | Rebuilds it from the three sources below |
 | `app.py` | Streamlit UI: lobby, race setup, leaderboard, QR invites |
 | `race_core.py` | `players.json` store + multiplayer room API (standard library only) |
 | `game_html.py` | The Three.js / Web Audio racing client |
@@ -257,6 +275,9 @@ join from anywhere.
 * The Streamlit API mount could raise `AttributeError` while scanning live
   objects and take the whole page down; it is fully guarded and now degrades to
   the standalone port instead.
+* Deploying `app.py` without its matching `race_core.py` crashed on startup.
+  `race_core` now carries a `VERSION`, `app.py` degrades with a plain message
+  instead of a traceback, and `streamlit_app.py` removes the possibility.
 * The "turn your phone sideways" overlay measured the iframe rather than the
   device, so it never went away — and it sat on top of the controls, which made
   the game unplayable on a phone. The prompt is gone entirely and the game plays

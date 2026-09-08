@@ -25,6 +25,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+# Bumped whenever app.py needs something new from this module, so a half-updated
+# copy shows a clear message instead of an AttributeError traceback.
+VERSION = 4
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 # Player records live in a plain JSON file so they are easy to read, edit,
 # back up, sync or check into version control.

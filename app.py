@@ -36,17 +36,47 @@ CIRCUITS = {1: "Sunset Oval · easy", 2: "Harbour Sweep · technical",
             3: "Grand Circuit · hard"}
 
 
+CORE_NEEDED = 4          # race_core.VERSION this file expects
+
+
 @st.cache_resource(show_spinner=False)
 def services():
+    """Start the league store, room manager and race server.
+
+    Written to tolerate a half-updated install: if race_core.py is older than
+    this file expects, the app drops the features that need it and says so,
+    rather than dying with a traceback.
+    """
     board = core.Leaderboard()
     rooms = core.RoomManager()
-    configs = core.ConfigStore()
-    mounted = core.attach_to_streamlit(board, rooms, configs=configs)
+
+    maker = getattr(core, "ConfigStore", None)
+    configs = maker() if maker else None
+
+    mounted = False
+    try:
+        mounted = (core.attach_to_streamlit(board, rooms, configs=configs) if configs
+                   else core.attach_to_streamlit(board, rooms))
+    except TypeError:                       # older signature without `configs`
+        try:
+            mounted = core.attach_to_streamlit(board, rooms)
+        except Exception:
+            mounted = False
+    except Exception:
+        mounted = False
+
     server = None
     for port in (API_PORT, 0):
         try:
-            server = core.GameServer(board, rooms, port=port, configs=configs)
+            server = (core.GameServer(board, rooms, port=port, configs=configs) if configs
+                      else core.GameServer(board, rooms, port=port))
             break
+        except TypeError:
+            try:
+                server = core.GameServer(board, rooms, port=port)
+                break
+            except Exception:
+                continue
         except Exception:
             continue
     return server, board, rooms, mounted, configs
@@ -54,6 +84,14 @@ def services():
 
 server, board, rooms, mounted, configs = services()
 api_port = server.port if server else None
+core_version = getattr(core, "VERSION", 0)
+
+if core_version < CORE_NEEDED:
+    st.warning(
+        "**Some files are out of date.** `race_core.py` is older than `app.py` expects, "
+        "so the fullscreen play page is switched off. Copy **app.py, race_core.py and "
+        "game_html.py** from the same download into the same folder and redeploy — "
+        "they are a set.")
 
 st.markdown(
     """
@@ -415,14 +453,15 @@ cfg = {
 
 # Streamlit's component iframe is sandboxed, and browsers refuse fullscreen from
 # one — so the game is also served at its own URL, where fullscreen works.
-play_token = configs.put(cfg)
-if mounted:
-    play_url = f"/racing/play?c={play_token}"
-elif api_port:
-    host = ss.share_base.split("//")[-1].split(":")[0] if ss.share_base else "localhost"
-    play_url = f"http://{host}:{api_port}/play?c={play_token}"
-else:
-    play_url = None
+play_url = None
+if configs is not None:
+    play_token = configs.put(cfg)
+    if mounted:
+        play_url = f"/racing/play?c={play_token}"
+    elif api_port:
+        host = (ss.share_base.split("//")[-1].split(":")[0]
+                if ss.share_base else "localhost")
+        play_url = f"http://{host}:{api_port}/play?c={play_token}"
 
 game_col, board_col = st.columns([2.6, 1.1])
 
